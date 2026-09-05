@@ -141,7 +141,11 @@ public sealed class MainForm : Form
             _composer.LoadSession(session);
         };
         _sessionList.ResendRequested += (_, session) => _ = _composer.ResendAsync(session);
-        _sessionList.SessionActivated += (_, _) => _rightTabs.SelectedIndex = 0;
+        _sessionList.SessionActivated += (_, session) =>
+        {
+            _rightTabs.SelectedIndex = 1;
+            _composer.LoadSession(session);
+        };
 
         // Known simplification: applying a Filterset writes straight into the same FilterText
         // the grid's own ad-hoc filter box uses, so it overwrites anything typed there by hand,
