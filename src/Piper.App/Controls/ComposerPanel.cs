@@ -630,7 +630,7 @@ public sealed class ComposerPanel : UserControl
 
             if (session.State == SessionState.Failed)
             {
-                _status.Text = $"Failed: {session.Error}";
+                _status.Text = $"Failed: {session.Error}{CertificateFailureHint.For(session.Error)}";
                 _status.ForeColor = Palette.StatusServerError;
             }
             else
