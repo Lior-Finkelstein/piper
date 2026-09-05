@@ -570,7 +570,7 @@ public sealed class MainForm : Form
         using var dialog = new OpenFileDialog
         {
             Title = "Open Fiddler SAZ capture",
-            Filter = "Fiddler SAZ captures (*.saz)|*.saz|All files (*.*)|*.*",
+            Filter = "Fiddler capture archives (*.saz;*.raz)|*.saz;*.raz|All files (*.*)|*.*",
             Multiselect = true,
         };
         if (dialog.ShowDialog(this) == DialogResult.OK) ImportSazFiles(dialog.FileNames);
