@@ -393,6 +393,18 @@ public sealed class ComposerPanel : UserControl
         _historyToolTip.SetToolTip(_results, text);
     }
 
+    /// <summary>Appends sessions (e.g. a Fiddler "request-only" archive import) to the persisted
+    /// Composer history, alongside whatever is already there.</summary>
+    public void AppendToHistory(IEnumerable<Session> sessions)
+    {
+        var added = sessions.Where(session => session.Request is not null).ToArray();
+        if (added.Length == 0) return;
+
+        _history.AddRange(added);
+        ComposerHistoryStore.Save(_history);
+        _searchDirty = true;
+    }
+
     private ContextMenuStrip BuildHistoryMenu()
     {
         var menu = new ContextMenuStrip { Font = Palette.UiFont };

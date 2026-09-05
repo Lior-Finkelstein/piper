@@ -576,7 +576,9 @@ public sealed class MainForm : Form
         if (dialog.ShowDialog(this) == DialogResult.OK) ImportSazFiles(dialog.FileNames);
     }
 
-    /// <summary>Imports SAZ files on a worker thread, then adds their completed sessions to the UI store.</summary>
+    /// <summary>Imports SAZ/RAZ files on a worker thread. A ".saz" (full session capture) adds its
+    /// sessions to the main request list; a ".raz" (request-only capture, no responses) instead
+    /// appends its requests to the Composer's persisted history, alongside what's already there.</summary>
     public async void ImportSazFiles(IEnumerable<string> filePaths)
     {
         var paths = filePaths.Where(SazFileRelay.IsSazFile).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
@@ -586,16 +588,27 @@ public sealed class MainForm : Form
         if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
         Activate();
 
+        var importedToComposer = false;
         foreach (var path in paths)
         {
             var result = await Task.Run(() => SazImporter.Import(path));
-            foreach (var session in result.Sessions) _store.Add(session);
+            var isComposerImport = path.EndsWith(".raz", StringComparison.OrdinalIgnoreCase);
+            if (isComposerImport)
+            {
+                _composer.AppendToHistory(result.Sessions);
+                importedToComposer = true;
+            }
+            else
+            {
+                foreach (var session in result.Sessions) _store.Add(session);
+            }
 
-            AppendLog($"Imported {result.Sessions.Count:N0} session(s) from {Path.GetFileName(path)}.");
+            AppendLog($"Imported {result.Sessions.Count:N0} session(s) from {Path.GetFileName(path)}" +
+                (isComposerImport ? " into Composer History." : "."));
             foreach (var warning in result.Warnings)
                 AppendLog($"SAZ import warning ({Path.GetFileName(path)}): {warning}");
         }
-        _rightTabs.SelectedIndex = 0;
+        _rightTabs.SelectedIndex = importedToComposer ? 1 : 0;
     }
 
     private ToolStrip BuildToolbar()
