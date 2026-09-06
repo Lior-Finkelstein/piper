@@ -24,7 +24,6 @@ public sealed class ComposerPanel : UserControl
     private readonly TextBox _searchBox;
     private readonly ListView _results;
     private readonly Label _resultCount;
-    private readonly Label _searchHint;
     private readonly SolidBrush _resultSurfaceBrush = new(Palette.Surface);
     private readonly SolidBrush _resultSelectionBrush = new(Palette.Selection);
     private readonly SolidBrush _resultHeaderBrush = new(Palette.SurfaceAlt);
@@ -37,9 +36,13 @@ public sealed class ComposerPanel : UserControl
     private readonly TextBox _body;
     private readonly TextBox _rawEditor;
     private readonly TabControl _editorTabs;
+    /// <summary>Index of the Raw page in <see cref="_editorTabs"/>; see where the pages are added.</summary>
+    private const int RawTabIndex = 1;
     private readonly Button _execute;
     private readonly Label _status;
-    private readonly ToolTip _historyToolTip = new();
+    // Also carries the search box's grammar examples, which need longer than the 5s default to
+    // read. Truncated history cells share the instance and simply stay up as long as the hover.
+    private readonly ToolTip _historyToolTip = new() { AutoPopDelay = 30000 };
     private string? _historyToolTipText;
     // Persisted Composer history belongs in this panel, not in SessionStore. The latter drives
     // the capture list, so restoring history there made an old composed request appear as the
@@ -61,20 +64,24 @@ public sealed class ComposerPanel : UserControl
         {
             Dock = DockStyle.Top,
             Font = Palette.Mono,
-            PlaceholderText = "Search requests you've sent...",
+            // Examples live in the tooltip below, not in a label under the box and not in this
+            // placeholder: a dim label flush under the box reads as a query already typed in, and
+            // this pane is narrow enough that a placeholder long enough to teach the grammar just
+            // gets clipped. Help > Search syntax remains the full reference.
+            PlaceholderText = "Search sent requests...",
         };
         _searchBox.TextChanged += (_, _) => RunSearch();
         _searchBox.KeyDown += OnSearchKeyDown;
+        _historyToolTip.SetToolTip(_searchBox, """
+            Filter your sent requests. Terms are ANDed.
 
-        _searchHint = new Label
-        {
-            Dock = DockStyle.Top,
-            Height = 32,
-            ForeColor = Palette.TextDim,
-            Font = new Font("Segoe UI", 7.5f),
-            Text = "method:POST  host:api  status:4xx  body:\"user_id\"  header:Authorization\r\n"
-                 + "size:>100kb  dur:>500  is:json  -is:image  /v[0-9]+\\/orders/",
-        };
+            method:POST   host:api   status:4xx
+            body:"user_id"   header:Authorization
+            size:>100kb   dur:>500
+            is:json   -is:image   /v[0-9]+\/orders/
+
+            Full grammar: Help > Search syntax
+            """.ReplaceLineEndings("\r\n"));
 
         _resultCount = new Label
         {
@@ -134,7 +141,6 @@ public sealed class ComposerPanel : UserControl
         var searchPane = new Panel { Dock = DockStyle.Fill, Padding = new Padding(4) };
         searchPane.Controls.Add(_results);
         searchPane.Controls.Add(_resultCount);
-        searchPane.Controls.Add(_searchHint);
         searchPane.Controls.Add(_searchBox);
 
         var searchHeader = new Label
@@ -195,7 +201,7 @@ public sealed class ComposerPanel : UserControl
 
         _editorTabs = new DarkTabControl { Dock = DockStyle.Fill, Font = Palette.UiFont };
         _editorTabs.TabPages.Add(NewPage("Headers", _headers));
-        _editorTabs.TabPages.Add(NewPage("Raw", _rawEditor));
+        _editorTabs.TabPages.Add(NewPage("Raw", _rawEditor)); // == RawTabIndex
         _editorTabs.Selecting += OnEditorTabSelecting;
         _editorTabs.Deselecting += OnEditorTabDeselecting;
 
@@ -495,20 +501,22 @@ public sealed class ComposerPanel : UserControl
 
         _rawEditor.Text = BuildRawText();
         _status.Text = $"Loaded #{session.Id} - edit and press Send (or Enter in the URL box).";
-        _editorTabs.SelectedIndex = 0;
+        // Raw shows the request line, headers and body at once, which is what you want when
+        // reviewing something already sent -- and it is what every caller here loads a session for.
+        _editorTabs.SelectedIndex = RawTabIndex;
         _url.Focus();
     }
 
     /// <summary>Keeps the Raw tab in sync when it is opened from the structured tabs.</summary>
     private void OnEditorTabSelecting(object? sender, TabControlCancelEventArgs e)
     {
-        if (e.TabPageIndex == 1) _rawEditor.Text = BuildRawText();
+        if (e.TabPageIndex == RawTabIndex) _rawEditor.Text = BuildRawText();
     }
 
     /// <summary>Parses the Raw tab back into the structured fields when leaving it.</summary>
     private void OnEditorTabDeselecting(object? sender, TabControlCancelEventArgs e)
     {
-        if (e.TabPageIndex != 1) return;
+        if (e.TabPageIndex != RawTabIndex) return;
         if (!RequestExecutor.TryParseRaw(_rawEditor.Text, out var parsed, out _)) return;
 
         _method.Text = parsed.Method;
@@ -521,15 +529,8 @@ public sealed class ComposerPanel : UserControl
         _body.Text = parsed.Body.Length > 0 ? Encoding.UTF8.GetString(parsed.Body) : string.Empty;
     }
 
-    private string BuildRawText()
-    {
-        var sb = new StringBuilder();
-        sb.Append(_method.Text.Trim().ToUpperInvariant()).Append(' ')
-          .Append(_url.Text.Trim()).Append(" HTTP/1.1\r\n");
-        sb.Append(_headers.Text.TrimEnd()).Append("\r\n\r\n");
-        sb.Append(_body.Text);
-        return sb.ToString();
-    }
+    private string BuildRawText() =>
+        RequestExecutor.BuildRawText(_method.Text, _url.Text, _headers.Text, _body.Text);
 
     private bool TryBuildRequest(out HttpRequestData request, out string error)
     {

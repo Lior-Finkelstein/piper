@@ -94,7 +94,11 @@ Terms are ANDed. Prefix any term with `-` or `!` to negate it.
 | `dur:` | `dur:>500` | milliseconds |
 | `is:` | `is:json`, `is:error`, `is:composed`, `is:slow` | see Help > Search syntax |
 
-Unknown fields are reported as a warning and ignored rather than failing the whole query.
+An unrecognised field is searched literally, so a pasted URL works as typed. A malformed value on
+a known field — `status:abc` — is reported as a warning and ignored rather than failing the query.
+
+A bare word scans a cached per-session haystack that skips non-text bodies and caps each message at
+64,000 characters. Use `body:`, `req:` or `resp:` to search a large body in full.
 
 ```
 method:POST host:api status:>=400 -is:image body:"order"
@@ -105,6 +109,7 @@ method:POST host:api status:>=400 -is:image body:"order"
 | Key | Action |
 | --- | --- |
 | `F12` | start / stop capturing |
+| `Ctrl+F` | focus the session filter box (with the session list focused) |
 | `Ctrl+K` | jump to the Composer search |
 | `Ctrl+E` | send the selected session to the Composer |
 | `Ctrl+T` | open the TextWizard |
@@ -280,6 +285,18 @@ Report suspected vulnerabilities privately as described in [SECURITY.md](SECURIT
 ## License
 
 Piper is licensed under the GNU General Public License v3.0 only. See [LICENSE](LICENSE).
+
+## Updates
+
+On startup, Piper checks the public GitHub latest-release endpoint and shows a prompt only when a
+newer version is available. **Help > Check for updates...** runs the same check manually. Each
+check is recorded as a composed `Piper (update check)` session. Update checks bypass all
+session-list filters, so their request and response are always visible in the Sessions list.
+
+Choosing to update downloads the release installer and its `SHA256SUMS.txt` manifest directly from
+GitHub. Piper verifies the installer hash before starting it, then closes so the installer can
+replace the running executable. Update checks send only the normal Piper user-agent and do not
+send captured traffic or telemetry.
 
 ## Releasing
 

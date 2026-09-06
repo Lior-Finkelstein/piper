@@ -50,6 +50,12 @@ public sealed class SessionListView : UserControl
     /// <summary>Raised when the user double-clicks a row, asking to look at it in the inspector.</summary>
     public event EventHandler<Session>? SessionActivated;
 
+    /// <summary>
+    /// Raised with a host the user asked to stop seeing. The grid deliberately does not know how
+    /// hiding is stored, so the form routes this into the Filters tab's persisted Hosts list.
+    /// </summary>
+    public event EventHandler<string>? HideHostRequested;
+
     public SessionListView(SessionStore store)
     {
         _store = store;
@@ -310,8 +316,10 @@ public sealed class SessionListView : UserControl
         for (var readIndex = 0; readIndex < _visible.Count; readIndex++)
         {
             var session = _visible[readIndex];
-            if (!_query.IsEmpty && !_query.Matches(session)) continue;
-            if (_visibilityFilter is not null && !_visibilityFilter(session)) continue;
+            // A check initiated by Piper must remain auditable in the grid. It is deliberately
+            // visible even when an ad-hoc or capture-scope filter would otherwise omit it.
+            if (!session.IsUpdateCheck && !_query.IsEmpty && !_query.Matches(session)) continue;
+            if (!session.IsUpdateCheck && _visibilityFilter is not null && !_visibilityFilter(session)) continue;
             _visible[writeIndex++] = session;
         }
 
@@ -443,9 +451,25 @@ public sealed class SessionListView : UserControl
         _list.DoDragDrop(session, DragDropEffects.Copy);
     }
 
+    /// <summary>Puts the caret in the filter box with the query selected, so typing replaces it.</summary>
+    private void FocusFilter()
+    {
+        _filterBox.Focus();
+        _filterBox.SelectAll();
+    }
+
     private void OnListKeyDown(object? sender, KeyEventArgs e)
     {
-        if (e.Control && e.KeyCode == Keys.C)
+        // Bound here rather than on MainForm: the Composer's history list and the inspector's
+        // search tabs own Ctrl+F for themselves, and a form-level binding (KeyPreview or a menu
+        // accelerator) would fire first and take it from them.
+        if (e.Control && e.KeyCode == Keys.F)
+        {
+            FocusFilter();
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+        }
+        else if (e.Control && e.KeyCode == Keys.C)
         {
             CopyUrls();
             e.Handled = true;
@@ -485,16 +509,14 @@ public sealed class SessionListView : UserControl
         var saveSessionsAsSaz = save.DropDownItems.Add("Selected sessions as &SAZ...", null, (_, _) => SaveSelectedSessionsAsSaz());
         menu.Items.Add(save);
         menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("&Find in sessions\tCtrl+F", null, (_, _) => FocusFilter());
         menu.Items.Add("Filter to this &host", null, (_, _) =>
         {
             if (SelectedSession is { } session) FilterText = $"host:{session.Host}";
         });
         menu.Items.Add("&Hide this host", null, (_, _) =>
         {
-            if (SelectedSession is { } session)
-                FilterText = string.IsNullOrWhiteSpace(FilterText)
-                    ? $"-host:{session.Host}"
-                    : $"{FilterText} -host:{session.Host}";
+            if (SelectedSession is { } session) HideHostRequested?.Invoke(this, session.Host);
         });
         menu.Items.Add(new ToolStripSeparator());
         var textWizard = new ToolStripMenuItem("Send URL to Text&Wizard", null,
