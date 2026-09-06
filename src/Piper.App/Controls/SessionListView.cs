@@ -316,8 +316,10 @@ public sealed class SessionListView : UserControl
         for (var readIndex = 0; readIndex < _visible.Count; readIndex++)
         {
             var session = _visible[readIndex];
-            if (!_query.IsEmpty && !_query.Matches(session)) continue;
-            if (_visibilityFilter is not null && !_visibilityFilter(session)) continue;
+            // A check initiated by Piper must remain auditable in the grid. It is deliberately
+            // visible even when an ad-hoc or capture-scope filter would otherwise omit it.
+            if (!session.IsUpdateCheck && !_query.IsEmpty && !_query.Matches(session)) continue;
+            if (!session.IsUpdateCheck && _visibilityFilter is not null && !_visibilityFilter(session)) continue;
             _visible[writeIndex++] = session;
         }
 

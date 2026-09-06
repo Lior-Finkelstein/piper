@@ -286,6 +286,18 @@ Report suspected vulnerabilities privately as described in [SECURITY.md](SECURIT
 
 Piper is licensed under the GNU General Public License v3.0 only. See [LICENSE](LICENSE).
 
+## Updates
+
+On startup, Piper checks the public GitHub latest-release endpoint and shows a prompt only when a
+newer version is available. **Help > Check for updates...** runs the same check manually. Each
+check is recorded as a composed `Piper (update check)` session. Update checks bypass all
+session-list filters, so their request and response are always visible in the Sessions list.
+
+Choosing to update downloads the release installer and its `SHA256SUMS.txt` manifest directly from
+GitHub. Piper verifies the installer hash before starting it, then closes so the installer can
+replace the running executable. Update checks send only the normal Piper user-agent and do not
+send captured traffic or telemetry.
+
 ## Releasing
 
 Set the `<Version>` in `src/Piper.App/Piper.App.csproj`, commit it, then create and push a

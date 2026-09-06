@@ -21,6 +21,8 @@ SetCompressor /FINAL /SOLID lzma
 !define MULTIUSER_INSTALLMODE_INSTDIR_REGISTRY_VALUENAME "InstallLocation"
 
 !include "MultiUser.nsh"
+!include "FileFunc.nsh"
+!include "LogicLib.nsh"
 
 !define MUI_ICON "..\src\Piper.App\Assets\piper.ico"
 !define MUI_UNICON "..\src\Piper.App\Assets\piper.ico"
@@ -47,6 +49,18 @@ UninstallIcon "..\src\Piper.App\Assets\piper.ico"
 
 Function .onInit
   !insertmacro MULTIUSER_INIT
+
+  # The in-app updater starts this installer before Piper exits. Waiting on that exact process
+  # prevents an attempted overwrite of the running executable, while direct installer launches
+  # remain unchanged because they have no /WAITPID argument.
+  ${GetOptions} $CMDLINE "/WAITPID=" $0
+  ${If} $0 != ""
+    System::Call 'kernel32::OpenProcess(i 0x00100000, i 0, i r0) p .r1'
+    ${If} $1 != 0
+      System::Call 'kernel32::WaitForSingleObject(p r1, i -1)'
+      System::Call 'kernel32::CloseHandle(p r1)'
+    ${EndIf}
+  ${EndIf}
 FunctionEnd
 
 Function un.onInit

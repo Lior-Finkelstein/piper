@@ -16,15 +16,17 @@ namespace Piper.Core.Proxy;
 public sealed class RequestExecutor(ProxyOptions options, SessionStore store)
 {
     /// <summary>Sends <paramref name="request"/> and records the exchange as a composed session.</summary>
-    public async Task<Session> ExecuteAsync(HttpRequestData request, CancellationToken ct = default)
+    public async Task<Session> ExecuteAsync(
+        HttpRequestData request, CancellationToken ct = default, bool isUpdateCheck = false)
     {
         var session = new Session
         {
             Request = request,
             IsComposed = true,
+            IsUpdateCheck = isUpdateCheck,
             State = SessionState.SendingRequest,
             ClientEndpoint = "composer",
-            ProcessName = "Piper (composer)",
+            ProcessName = isUpdateCheck ? "Piper (update check)" : "Piper (composer)",
         };
 
         var url = request.Url ?? HttpParser.ResolveUrl(request);
