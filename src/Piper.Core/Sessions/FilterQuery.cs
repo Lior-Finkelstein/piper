@@ -40,6 +40,14 @@ public static class FilterQuery
     /// <see cref="FilterSettings.HostsText"/> field when a filterset predates the per-host
     /// checkboxes and so carries no <see cref="FilterSettings.Hosts"/> entries.
     /// </summary>
+    /// <remarks>
+    /// The Filters tab never reaches the fallback: it migrates a legacy HostsText into real host
+    /// rows when the filterset is loaded, and derives HostsText back from those rows afterwards,
+    /// so an empty Hosts collection always arrives with an empty HostsText. The fallback exists
+    /// for settings deserialized straight from disk, which is what the tests exercise. Keeping it
+    /// here rather than in the panel means a legacy filterset can never compose a host term the
+    /// user has no checkbox to switch off.
+    /// </remarks>
     private static string EnabledHosts(FilterSettings settings) =>
         settings.Hosts is { Count: > 0 } hosts
             ? string.Join(';', hosts.Where(host => host.Enabled).Select(host => host.Pattern))

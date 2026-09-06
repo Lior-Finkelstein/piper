@@ -61,10 +61,13 @@ public sealed class FilterPanel : UserControl
             Padding = new Padding(6, 10, 0, 0),
             Font = new Font(Palette.UiFont, FontStyle.Bold),
         };
-        // The global switch is live, not staged. Leaving a filterset applied after the user
-        // unchecks it keeps SessionStore discarding non-matching completed sessions, which is
-        // unrecoverable. The criteria below stay staged until an Actions command runs them.
-        // FilterChanged already persists the settings, so this must not also raise SettingsChanged.
+        // The global switch is live in both directions, matching Fiddler: unchecking stops
+        // filtering at once (leaving a filterset applied after the user disables it keeps
+        // SessionStore discarding non-matching completed sessions, which is unrecoverable), and
+        // checking runs the staged criteria the same way Actions > Run Filterset now does. The
+        // criteria themselves stay staged, so a half-typed host pattern is never applied on its own.
+        // MainForm's FilterChanged handler persists Settings, so this must not also raise
+        // SettingsChanged or every toggle would save twice.
         _useFilters.CheckedChanged += (_, _) =>
         {
             if (!_applyingSettings) ApplyFilterset();
@@ -271,12 +274,15 @@ public sealed class FilterPanel : UserControl
 
     private void ShowHelp() => MessageBox.Show(this,
         "Add one or more host patterns, then use their checkboxes to choose which ones apply. "
-        + "Host and Response Status Code edits stay staged until Actions > Run Filterset now. "
-        + "The Use Filters checkbox takes effect immediately: unchecking it stops filtering at "
-        + "once, and Actions > Show all sessions does the same without discarding the "
-        + "filterset.\r\n\r\n"
+        + "Host and Response Status Code edits stay staged, so a partly-typed pattern is never "
+        + "applied on its own.\r\n\r\n"
+        + "The Use Filters checkbox takes effect immediately in both directions. Checking it "
+        + "runs the staged filterset straight away, exactly as Actions > Run Filterset now does; "
+        + "unchecking it stops filtering at once, as does Actions > Show all sessions, which "
+        + "leaves the filterset itself intact.\r\n\r\n"
         + "Filtered-out sessions are dropped rather than hidden, so traffic captured while a "
-        + "filter is applied cannot be recovered by turning the filter off afterwards.\r\n\r\n"
+        + "filter is applied cannot be recovered by turning the filter off afterwards. Check "
+        + "your host and status choices before enabling the filterset.\r\n\r\n"
         + "Filters compose into the same query grammar as the session grid's own filter box, "
         + "so running a filterset overwrites anything typed there by hand.\r\n\r\n"
         + "Only Hosts and Response Status Code filters are implemented.",

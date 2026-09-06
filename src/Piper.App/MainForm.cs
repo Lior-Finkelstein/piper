@@ -145,7 +145,8 @@ public sealed class MainForm : Form
 
         // Known simplification: applying a Filterset writes straight into the same FilterText
         // the grid's own ad-hoc filter box uses, so it overwrites anything typed there by hand,
-        // and the two are never combined. FilterPanel stages edits until Actions applies them.
+        // and the two are never combined. FilterPanel stages criteria edits until Actions or the
+        // Use Filters switch applies them. Saving here is what persists that switch, so keep it.
         _filterPanel.FilterChanged += (_, query) =>
         {
             _sessionList.FilterText = query;
