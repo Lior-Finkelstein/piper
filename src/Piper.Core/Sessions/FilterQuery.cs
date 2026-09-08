@@ -47,9 +47,16 @@ public static class FilterQuery
     /// for settings deserialized straight from disk, which is what the tests exercise. Keeping it
     /// here rather than in the panel means a legacy filterset can never compose a host term the
     /// user has no checkbox to switch off.
+    /// <para>
+    /// Because this is reachable with settings straight from a filterset file, a hand-edited or
+    /// truncated one can carry a null list or null entries -- the same hazard
+    /// <see cref="FilterSettings.HideHost"/> guards against -- so entries are matched by pattern
+    /// rather than dereferenced. A null <see cref="HostFilterEntry.Pattern"/> joins as empty and
+    /// is then dropped by <see cref="HostFilterTerm.Compose"/>.
+    /// </para>
     /// </remarks>
     private static string EnabledHosts(FilterSettings settings) =>
         settings.Hosts is { Count: > 0 } hosts
-            ? string.Join(';', hosts.Where(host => host.Enabled).Select(host => host.Pattern))
+            ? string.Join(';', hosts.Where(host => host is { Enabled: true }).Select(host => host.Pattern))
             : settings.HostsText;
 }

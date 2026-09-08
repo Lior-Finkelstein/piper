@@ -242,7 +242,16 @@ public sealed class FilterPanel : UserControl
         {
             var json = File.ReadAllText(dialog.FileName);
             var settings = JsonSerializer.Deserialize<FilterSettings>(json);
-            if (settings is not null) ApplySettings(settings);
+            if (settings is null) return;
+
+            // A filterset carries its own enabled state, so applying it is part of loading it.
+            // Staging only would leave the previous query on SessionStore.CompletedSessionFilter:
+            // the panel would show the loaded criteria while capture kept dropping traffic by the
+            // old ones, and a filterset saved with Use Filters off would not stop the filtering it
+            // is meant to describe. Loading from Actions is an explicit user action, like the
+            // switch itself, so it applies rather than staging.
+            ApplySettings(settings);
+            ApplyFilterset();
         }
         catch (Exception ex)
         {
@@ -315,7 +324,9 @@ public sealed class FilterPanel : UserControl
             var hosts = savedHosts.Count > 0
                 ? savedHosts
                 : HostFilterTerm.Split(settings.HostsText).Select(pattern => new HostFilterEntry { Pattern = pattern }).ToList();
-            foreach (var host in hosts.Where(host => !string.IsNullOrWhiteSpace(host.Pattern)))
+            // A hand-edited or truncated file can carry null entries and blank patterns, the same
+            // hazard FilterSettings.HideHost guards against, so skip them rather than dereference.
+            foreach (var host in hosts.Where(host => !string.IsNullOrWhiteSpace(host?.Pattern)))
                 _hostsList.Items.Add(host.Pattern.Trim(), host.Enabled);
 
             _hideSuccess.Checked = settings.HideSuccess;

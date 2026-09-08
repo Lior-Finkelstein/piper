@@ -73,6 +73,33 @@ internal static class FilterQueryTests
             runner.AreEqual("host:a.com", FilterQuery.Compose(nullHosts),
                 "a malformed filterset with a null Hosts list falls back rather than throwing");
 
+            // A hand-edited or truncated filterset reaches Compose straight from disk, so entries
+            // themselves can be null and patterns can be null or blank.
+            var nullEntries = new FilterSettings
+            {
+                UseFilters = true,
+                Hosts = [null!, new HostFilterEntry { Pattern = "a.com", Enabled = true }, null!],
+            };
+            runner.AreEqual("host:a.com", FilterQuery.Compose(nullEntries),
+                "null host entries are skipped rather than dereferenced");
+
+            var nullPattern = new FilterSettings
+            {
+                UseFilters = true,
+                Hosts =
+                [
+                    new HostFilterEntry { Pattern = null!, Enabled = true },
+                    new HostFilterEntry { Pattern = "  ", Enabled = true },
+                    new HostFilterEntry { Pattern = "a.com", Enabled = true },
+                ],
+            };
+            runner.AreEqual("host:a.com", FilterQuery.Compose(nullPattern),
+                "null and blank patterns drop out instead of composing an empty alternative");
+
+            var onlyNullEntries = new FilterSettings { UseFilters = true, Hosts = [null!] };
+            runner.AreEqual(string.Empty, FilterQuery.Compose(onlyNullEntries),
+                "a Hosts list of nothing but null entries composes no host term");
+
             var everything = new FilterSettings
             {
                 UseFilters = true,
