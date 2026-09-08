@@ -166,6 +166,10 @@ public sealed class MainForm : Form
             _sessionList.FilterText = query;
             var admissionQuery = SearchQuery.Parse(query);
             _store.CompletedSessionFilter = admissionQuery.IsEmpty ? null : admissionQuery.Matches;
+            // Keep this save unconditional. The Use Filters checkbox no longer raises
+            // SettingsChanged, so this is the only path that persists it: making the save depend
+            // on a non-empty query would stop unticking from being written, and the filterset
+            // would come back applied on the next start.
             FilterSettingsStore.Save(_filterPanel.Settings);
             _rightTabs.SetTabChecked(filtersPage, !admissionQuery.IsEmpty);
         };

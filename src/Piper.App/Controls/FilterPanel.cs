@@ -217,16 +217,26 @@ public sealed class FilterPanel : UserControl
     {
         // Adding hosts should make the expected path simple: Actions > Run activates the staged
         // filterset even when the user has not separately ticked the global checkbox.
-        _useFilters.Checked = true;
-        ApplyFilterset();
+        SetUseFilters(true);
+    }
+
+    /// <summary>
+    /// Moves the switch to <paramref name="useFilters"/> and applies the filterset exactly once.
+    /// Assigning the checkbox raises CheckedChanged, which applies on its own, so an unconditional
+    /// apply here would refilter the whole grid and rewrite the settings file twice per command.
+    /// A no-op assignment raises nothing, so that case still has to apply explicitly.
+    /// </summary>
+    private void SetUseFilters(bool useFilters)
+    {
+        if (_useFilters.Checked == useFilters) ApplyFilterset();
+        else _useFilters.Checked = useFilters;
     }
 
     private void ShowAllSessions()
     {
         // Preserve every host and status choice for a later run; only the applied query is
         // cleared. This makes it safe to temporarily inspect the full capture list.
-        _useFilters.Checked = false;
-        ApplyFilterset();
+        SetUseFilters(false);
     }
 
     private void LoadFilterset()
