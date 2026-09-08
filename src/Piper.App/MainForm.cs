@@ -27,6 +27,10 @@ public sealed class MainForm : Form, IMessageFilter
     private readonly DarkTabControl _rightTabs;
 
     private readonly ToolStripStatusLabel _zoomLabel;
+    private ToolStripMenuItem? _zoomInItem;
+    private ToolStripMenuItem? _zoomOutItem;
+    private ToolStripMenuItem? _zoomResetItem;
+    private int _wheelRemainder;
     private readonly ToolStripStatusLabel _statusLabel;
     private readonly ToolStripStatusLabel _captureStatusLabel;
     private readonly ToolStripStatusLabel _captureScopeLabel;
@@ -59,7 +63,11 @@ public sealed class MainForm : Form, IMessageFilter
         // Before any control exists: every control that asks the palette for a font during
         // construction then gets the saved size straight away, so the existing Palette.Apply below
         // has nothing left to correct.
-        if (FontScaleSettingsStore.Load() is { } fontScale) FontScale.SetStep(fontScale.Step);
+        if (FontScaleSettingsStore.Load() is { } fontScale)
+        {
+            FontScale.SetStep(fontScale.Step);
+            FontScale.WheelEnabled = fontScale.WheelZoomEnabled;
+        }
         Palette.RescaleFonts();
 
         DoubleBuffered = true;
@@ -465,18 +473,11 @@ public sealed class MainForm : Form, IMessageFilter
     private ToolStripMenuItem BuildViewMenu()
     {
         var view = new ToolStripMenuItem("&View");
-        var zoomIn = NewZoomItem("Zoom &in", Keys.Control | Keys.Oemplus, "Ctrl++", FontScale.ZoomIn);
-        var zoomOut = NewZoomItem("Zoom &out", Keys.Control | Keys.OemMinus, "Ctrl+-", FontScale.ZoomOut);
-        var reset = NewZoomItem("&Reset zoom", Keys.Control | Keys.D0, "Ctrl+0", FontScale.Reset);
-        view.DropDownItems.AddRange([zoomIn, zoomOut, new ToolStripSeparator(), reset]);
-        view.DropDownOpening += (_, _) =>
-        {
-            // Greying out at the clamp says the range is deliberate rather than the key being broken.
-            zoomIn.Enabled = FontScale.Step < FontScaleSettingsStore.MaxStep;
-            zoomOut.Enabled = FontScale.Step > FontScaleSettingsStore.MinStep;
-            reset.Enabled = !FontScale.IsDefault;
-            reset.Text = FontScale.IsDefault ? "&Reset zoom" : $"&Reset zoom (now {FontScale.Percent}%)";
-        };
+        _zoomInItem = NewZoomItem("Zoom &in", Keys.Control | Keys.Oemplus, "Ctrl++", FontScale.ZoomIn);
+        _zoomOutItem = NewZoomItem("Zoom &out", Keys.Control | Keys.OemMinus, "Ctrl+-", FontScale.ZoomOut);
+        _zoomResetItem = NewZoomItem("&Reset zoom", Keys.Control | Keys.D0, "Ctrl+0", FontScale.Reset);
+        view.DropDownItems.AddRange([_zoomInItem, _zoomOutItem, new ToolStripSeparator(), _zoomResetItem]);
+        UpdateZoomMenu();
         return view;
     }
 
@@ -597,6 +598,7 @@ public sealed class MainForm : Form, IMessageFilter
     private void ShowConfigurations()
     {
         using var dialog = new ConfigurationsDialog(_options, _captureEnabledOnStartup, _captureScope.ToString(),
+            FontScale.WheelEnabled,
             TrustRootCertificate, UntrustRootCertificate, ExportRootCertificate, OpenCertificateFolder);
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
 
@@ -610,6 +612,8 @@ public sealed class MainForm : Form, IMessageFilter
             CaptureScope = _captureScope.ToString(),
         });
         ProxyConfigurationSettingsStore.Save(ProxyConfigurationSettings.From(_options));
+        FontScale.WheelEnabled = dialog.WheelZoom;
+        SaveFontScaleSettings();
         AppendLog("Configurations saved. HTTPS protocol changes apply to new connections.");
     }
 
@@ -1340,12 +1344,27 @@ public sealed class MainForm : Form, IMessageFilter
     public bool PreFilterMessage(ref Message m)
     {
         const int WmMouseWheel = 0x020A;
+        const int WheelDelta = 120;
         if (m.Msg != WmMouseWheel || ModifierKeys != Keys.Control) return false;
+        if (!FontScale.WheelEnabled) return false;
 
         var delta = (short)((long)m.WParam >> 16);
         if (delta == 0) return false;
 
-        ChangeFontScale(delta > 0 ? FontScale.ZoomIn() : FontScale.ZoomOut());
+        // Accumulated against one detent rather than treated as a direction: a precision touchpad
+        // reports fractions of a notch, and stepping a full 10% per message would run the whole
+        // range in one gesture. Reversing direction drops the partial notch so the pointer does not
+        // feel sticky.
+        if (Math.Sign(delta) != Math.Sign(_wheelRemainder)) _wheelRemainder = 0;
+        _wheelRemainder += delta;
+
+        while (Math.Abs(_wheelRemainder) >= WheelDelta)
+        {
+            var up = _wheelRemainder > 0;
+            _wheelRemainder -= up ? WheelDelta : -WheelDelta;
+            ChangeFontScale(up ? FontScale.ZoomIn() : FontScale.ZoomOut());
+        }
+
         return true;
     }
 
@@ -1360,8 +1379,35 @@ public sealed class MainForm : Form, IMessageFilter
         Palette.RescaleFonts();
         Palette.Apply(this);
         UpdateZoomStatus();
+        UpdateZoomMenu();
         InvalidateTheme(this);
     }
+
+    /// <summary>
+    /// Keeps the View menu's zoom commands in step with the current size.
+    /// </summary>
+    /// <remarks>
+    /// This has to run on every change, not just when the menu opens: a disabled
+    /// <see cref="ToolStripMenuItem"/> does not fire its <see cref="ToolStripMenuItem.ShortcutKeys"/>,
+    /// so refreshing only in <c>DropDownOpening</c> would leave Ctrl+0 dead after the menu had once
+    /// been opened at 100%, and Ctrl+Plus dead after it had been opened at the top clamp.
+    /// </remarks>
+    private void UpdateZoomMenu()
+    {
+        if (_zoomInItem is null || _zoomOutItem is null || _zoomResetItem is null) return;
+
+        // Greying out at the clamp says the range is deliberate rather than the key being broken.
+        _zoomInItem.Enabled = FontScale.Step < FontScaleSettingsStore.MaxStep;
+        _zoomOutItem.Enabled = FontScale.Step > FontScaleSettingsStore.MinStep;
+        _zoomResetItem.Enabled = !FontScale.IsDefault;
+        _zoomResetItem.Text = FontScale.IsDefault ? "&Reset zoom" : $"&Reset zoom (now {FontScale.Percent}%)";
+    }
+
+    private static void SaveFontScaleSettings() => FontScaleSettingsStore.Save(new FontScaleSettings
+    {
+        Step = FontScale.Step,
+        WheelZoomEnabled = FontScale.WheelEnabled,
+    });
 
     private void UpdateZoomStatus()
     {
@@ -1482,7 +1528,7 @@ public sealed class MainForm : Form, IMessageFilter
         }
 
         SaveWindowBounds();
-        FontScaleSettingsStore.Save(new FontScaleSettings { Step = FontScale.Step });
+        SaveFontScaleSettings();
 
         // Windows shutdown, Task Manager and Application.Exit do not honour a cancelled close:
         // deferring the cleanup to a continuation there would let the process go away with the

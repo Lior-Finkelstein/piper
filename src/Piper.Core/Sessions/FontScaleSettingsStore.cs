@@ -9,6 +9,13 @@ namespace Piper.Core.Sessions;
 public sealed class FontScaleSettings
 {
     public int Step { get; set; }
+
+    /// <summary>
+    /// Whether Ctrl+MouseWheel resizes the UI. Off leaves the menu and keyboard shortcuts working,
+    /// so the size stays reachable for anyone who only wants to stop resizing it by accident while
+    /// scrolling.
+    /// </summary>
+    public bool WheelZoomEnabled { get; set; } = true;
 }
 
 /// <summary>

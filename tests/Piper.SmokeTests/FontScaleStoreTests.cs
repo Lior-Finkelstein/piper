@@ -7,10 +7,19 @@ internal static class FontScaleStoreTests
         var path = Path.Combine(Path.GetTempPath(), $"piper-font-scale-{Guid.NewGuid():N}.json");
         try
         {
-            FontScaleSettingsStore.Save(new FontScaleSettings { Step = 3 }, path);
+            FontScaleSettingsStore.Save(new FontScaleSettings { Step = 3, WheelZoomEnabled = false }, path);
             var restored = FontScaleSettingsStore.Load(path);
             runner.IsTrue(restored is not null, "saved step can be loaded");
             runner.AreEqual(3, restored!.Step, "step round trips");
+            runner.AreEqual(false, restored.WheelZoomEnabled, "the Ctrl+MouseWheel toggle round trips");
+
+            // The gesture is on unless it was deliberately turned off, so a file written before the
+            // toggle existed must not silently disable it.
+            runner.AreEqual(true, new FontScaleSettings().WheelZoomEnabled, "the toggle defaults to on");
+            File.WriteAllText(path, """{"Step":2}""");
+            var legacy = FontScaleSettingsStore.Load(path);
+            runner.AreEqual(2, legacy!.Step, "a file predating the toggle still loads its step");
+            runner.AreEqual(true, legacy.WheelZoomEnabled, "and leaves the gesture enabled");
 
             // Clamping is what keeps the layout usable, so the bounds are asserted directly.
             runner.AreEqual(FontScaleSettingsStore.MaxStep, FontScaleSettingsStore.Clamp(FontScaleSettingsStore.MaxStep + 1),

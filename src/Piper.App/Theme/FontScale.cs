@@ -55,6 +55,12 @@ internal static class FontScale
 
     private static int _step;
 
+    /// <summary>
+    /// Whether the Ctrl+MouseWheel gesture is live. The menu and keyboard shortcuts ignore this, so
+    /// turning it off cannot leave the size unreachable.
+    /// </summary>
+    public static bool WheelEnabled { get; set; } = true;
+
     static FontScale()
     {
         for (var i = 0; i < Bases.Length; i++)

@@ -8,6 +8,7 @@ namespace Piper.App;
 public sealed class ConfigurationsDialog : Form
 {
     private CheckBox _captureOnStartup = null!;
+    private CheckBox _wheelZoom = null!;
     private ComboBox _captureScope = null!;
     private CheckBox _decryptHttps = null!;
     private CheckBox _http2Downstream = null!;
@@ -15,6 +16,7 @@ public sealed class ConfigurationsDialog : Form
     private CheckBox _http3Upstream = null!;
 
     public ConfigurationsDialog(ProxyOptions options, bool captureOnStartup, string captureScope,
+        bool wheelZoom,
         Action trustRoot, Action removeTrustedRoot, Action exportRoot, Action openCertificateFolder)
     {
         Text = "Configurations";
@@ -26,7 +28,7 @@ public sealed class ConfigurationsDialog : Form
         ShowInTaskbar = false;
 
         var tabs = new DarkTabControl { Dock = DockStyle.Fill, Font = Palette.UiFont };
-        tabs.TabPages.Add(CreateGeneralPage(captureOnStartup, captureScope));
+        tabs.TabPages.Add(CreateGeneralPage(captureOnStartup, captureScope, wheelZoom));
         tabs.TabPages.Add(CreateHttpsPage(options, trustRoot, removeTrustedRoot, exportRoot, openCertificateFolder));
 
         var save = new Button { Text = "Save", DialogResult = DialogResult.OK, Size = new Size(100, 34) };
@@ -58,6 +60,9 @@ public sealed class ConfigurationsDialog : Form
 
     public bool CaptureOnStartup => _captureOnStartup.Checked;
 
+    /// <summary>Whether Ctrl+MouseWheel should resize the UI.</summary>
+    public bool WheelZoom => _wheelZoom.Checked;
+
     public string CaptureScope => (_captureScope.SelectedItem as CaptureScopeChoice)?.Value ?? "AllProcesses";
 
     public void ApplyTo(ProxyOptions options)
@@ -68,7 +73,7 @@ public sealed class ConfigurationsDialog : Form
         options.EnableHttp3Upstream = _http3Upstream.Checked;
     }
 
-    private TabPage CreateGeneralPage(bool captureOnStartup, string captureScope)
+    private TabPage CreateGeneralPage(bool captureOnStartup, string captureScope, bool wheelZoom)
     {
         var page = new TabPage("General");
         var panel = new TableLayoutPanel
@@ -77,7 +82,7 @@ public sealed class ConfigurationsDialog : Form
             AutoSize = true,
             Padding = new Padding(16),
             ColumnCount = 2,
-            RowCount = 4,
+            RowCount = 6,
         };
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -129,6 +134,27 @@ public sealed class ConfigurationsDialog : Form
         };
         panel.Controls.Add(note, 0, 3);
         panel.SetColumnSpan(note, 2);
+
+        _wheelZoom = new CheckBox
+        {
+            Text = "Resize the UI with Ctrl+MouseWheel",
+            Checked = wheelZoom,
+            AutoSize = true,
+            Margin = new Padding(0, 18, 0, 0),
+        };
+        panel.Controls.Add(_wheelZoom, 0, 4);
+        panel.SetColumnSpan(_wheelZoom, 2);
+
+        var zoomNote = new Label
+        {
+            Text = "View > Zoom and Ctrl+plus / Ctrl+minus / Ctrl+0 keep working either way, so"
+                 + " turning this off only stops the size changing while you scroll.",
+            AutoSize = true,
+            ForeColor = Palette.TextDim,
+            Margin = new Padding(22, 2, 0, 0),
+        };
+        panel.Controls.Add(zoomNote, 0, 5);
+        panel.SetColumnSpan(zoomNote, 2);
 
         page.Controls.Add(panel);
         return page;

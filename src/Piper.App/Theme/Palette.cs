@@ -266,22 +266,26 @@ public static class Palette
     /// clipped by a row sized for the default font.
     /// </summary>
     /// <remarks>
-    /// ponytail: a docked single-line row has no auto-height in WinForms and there are about
-    /// thirty-five of these constants, so the walk scales them rather than each being edited by
-    /// hand. Ceiling: it deliberately leaves <see cref="SplitContainer.SplitterDistance"/>, the
-    /// splitter minimum sizes, and ListView column widths alone -- splitters are user-draggable and
-    /// the columns already expand to fit the view, so those absorb the change on their own. A dialog
-    /// whose whole client size needs to grow does that at its own call site via
-    /// <see cref="ScaleDialogSize"/>.
+    /// A docked single-line row has no auto-height in WinForms and there are about thirty-five of
+    /// these constants, so the walk scales them rather than each being edited by hand. It
+    /// deliberately leaves <see cref="SplitContainer.SplitterDistance"/>, the splitter minimum
+    /// sizes, and ListView column widths alone -- splitters are user-draggable and the columns
+    /// already expand to fit the view, so those absorb the change on their own. A dialog whose whole
+    /// client size needs to grow does that at its own call site via <see cref="ScaleDialogSize"/>.
     /// </remarks>
     private static void ApplyRowHeight(Control control)
     {
         if (control.AutoSize || control.Dock is not (DockStyle.Top or DockStyle.Bottom)) return;
 
+        // Nothing to scale at the default size. Returning early also keeps this shared walk from
+        // touching geometry at all on a theme toggle, which has no business resizing anything.
+        if (FontScale.IsDefault && !BaseHeights.TryGetValue(control, out _)) return;
+
         // Captured on the first visit, which is before any scaling has touched this control, so the
         // stored value stays the unscaled one no matter how often the size changes afterwards.
         var unscaled = BaseHeights.GetValue(control, static c => new BaseHeight(c.Height)).Value;
-        control.Height = (int)Math.Round(unscaled * FontScale.Multiplier);
+        var target = (int)Math.Round(unscaled * FontScale.Multiplier);
+        if (control.Height != target) control.Height = target;
     }
 
     /// <summary>

@@ -126,6 +126,10 @@ method:POST host:api status:>=400 -is:image body:"order"
 built from fixed row heights starts clipping its own text - and it is remembered between runs. The
 status bar shows the current percentage whenever it is not 100%.
 
+If Ctrl+MouseWheel gets in the way while scrolling, turn it off under
+**Tools > Configurations > General**. The menu and the keyboard shortcuts keep working, so the size
+is still reachable.
+
 ## Testing
 
 ```bash
