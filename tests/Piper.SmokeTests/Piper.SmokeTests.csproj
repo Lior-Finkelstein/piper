@@ -12,4 +12,8 @@
     <ProjectReference Include="..\..\src\Piper.Core\Piper.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\..\src\Piper.App\UpdateService.cs" Link="UpdateService.cs" />
+  </ItemGroup>
+
 </Project>

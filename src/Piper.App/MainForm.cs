@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Windows.Forms;
 using Piper.App.Controls;
 using Piper.App.Theme;
@@ -14,6 +15,7 @@ public sealed class MainForm : Form
     private readonly CertificateAuthority _ca;
     private readonly ProxyServer _proxy;
     private readonly RequestExecutor _executor;
+    private readonly UpdateService _updates;
 
     private readonly SessionListView _sessionList;
     private readonly InspectorPanel _inspector;
@@ -31,6 +33,8 @@ public sealed class MainForm : Form
     private readonly ToolStripStatusLabel _sessionsLabel;
     private readonly ToolStripStatusLabel _selectedSessionDetailsLabel;
     private ToolStripButton? _themeToggle;
+    private ToolStripMenuItem? _checkForUpdatesMenuItem;
+    private readonly CancellationTokenSource _updatesCancellation = new();
 
     private static Image CaptureOnIcon = CreateDotIcon(Palette.StatusOk);
     private static Image CaptureOffIcon = CreateDotIcon(Palette.StatusServerError);
@@ -46,6 +50,8 @@ public sealed class MainForm : Form
     private bool _shutdownInProgress;
     private bool _closeAfterShutdown;
     private bool _sessionsStatusUpdateQueued;
+    private bool _updateCheckInProgress;
+    private bool _resourcesDisposed;
 
     public MainForm()
     {
@@ -75,6 +81,14 @@ public sealed class MainForm : Form
         _ca = CertificateAuthority.LoadOrCreate();
         _proxy = new ProxyServer(_options, _ca, _store);
         _executor = new RequestExecutor(_options, _store);
+        // Update traffic is still recorded in the shared store, but it must not inherit mutable
+        // proxy settings such as host remapping or disabled certificate validation.
+        _updates = new UpdateService(new RequestExecutor(new ProxyOptions
+        {
+            ConnectTimeout = TimeSpan.FromSeconds(15),
+            EnableHttp2Upstream = false,
+            ValidateUpstreamCertificates = true,
+        }, _store));
 
         _sessionList = new SessionListView(_store) { Dock = DockStyle.Fill };
         _inspector = new InspectorPanel { Dock = DockStyle.Fill };
@@ -156,6 +170,7 @@ public sealed class MainForm : Form
             _rightTabs.SetTabChecked(filtersPage, !admissionQuery.IsEmpty);
         };
         _filterPanel.SettingsChanged += (_, _) => FilterSettingsStore.Save(_filterPanel.Settings);
+        _sessionList.HideHostRequested += (_, host) => HideHost(host);
 
         // Restore the editable settings and then apply their saved enabled state so a restart
         // returns to the same filtered capture view.
@@ -226,6 +241,7 @@ public sealed class MainForm : Form
         if (!EnsureTrustedRootForStartup())
         {
             UpdateCaptureStatus();
+            QueueStartupUpdateCheck();
             return;
         }
 
@@ -241,6 +257,13 @@ public sealed class MainForm : Form
         // Runs after the window is already visible (StartCapture doesn't block), so unlike the
         // constructor this is a safe place for something that could pop a dialog on failure.
         if (_proxy.IsRunning) EnableSystemProxy();
+        QueueStartupUpdateCheck();
+    }
+
+    private void QueueStartupUpdateCheck()
+    {
+        if (!_closeAfterShutdown)
+            BeginInvoke(new Action(() => _ = CheckForUpdatesAsync(manual: false)));
     }
 
     /// <summary>
@@ -410,6 +433,10 @@ public sealed class MainForm : Form
 
         var help = new ToolStripMenuItem("&Help");
         help.DropDownItems.Add("&Search syntax", null, (_, _) => ShowSearchHelp());
+        _checkForUpdatesMenuItem = new ToolStripMenuItem("Check for &updates...", null,
+            async (_, _) => await CheckForUpdatesAsync(manual: true));
+        help.DropDownItems.Add(_checkForUpdatesMenuItem);
+        help.DropDownItems.Add(new ToolStripSeparator());
         help.DropDownItems.Add("&About", null, (_, _) => MessageBox.Show(this,
             "Piper\r\n\r\nAn HTTP(S) debugging proxy written from scratch on .NET 10.",
             "About Piper", MessageBoxButtons.OK, MessageBoxIcon.Information));
@@ -796,6 +823,107 @@ public sealed class MainForm : Form
 
     // ----------------------------------------------------------------- actions
 
+    private async Task CheckForUpdatesAsync(bool manual)
+    {
+        if (_updateCheckInProgress)
+        {
+            if (manual)
+                MessageBox.Show(this, "Piper is already checking for updates.", "Piper",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        _updateCheckInProgress = true;
+        if (_checkForUpdatesMenuItem is not null) _checkForUpdatesMenuItem.Enabled = false;
+        try
+        {
+            var result = await _updates.CheckAsync(CurrentVersion, _updatesCancellation.Token);
+            if (IsDisposed) return;
+
+            if (result.Error is not null)
+            {
+                AppendLog($"Update check failed: {result.Error}");
+                if (manual)
+                    MessageBox.Show(this, result.Error, "Check for updates", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (!result.IsUpdateAvailable)
+            {
+                AppendLog($"Piper {CurrentVersion} is up to date.");
+                if (manual)
+                    MessageBox.Show(this, $"Piper {CurrentVersion} is up to date.", "Check for updates",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var release = result.Release!;
+            AppendLog($"Piper {release.Version} is available.");
+            var answer = MessageBox.Show(this,
+                $"Piper {release.Version} is available.\r\n\r\nDownload and install it now?\r\n\r\n"
+                + "The installer will verify its SHA-256 checksum, then Piper will close so Windows can update it.",
+                "Piper update available", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+            if (answer != DialogResult.Yes) return;
+
+            await DownloadAndInstallUpdateAsync(release);
+        }
+        catch (OperationCanceledException) when (_updatesCancellation.IsCancellationRequested)
+        {
+            // The application is closing. There is no useful update status to show.
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Update check failed: {ex.Message}");
+            if (manual && !IsDisposed)
+                MessageBox.Show(this, ex.Message, "Check for updates", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            _updateCheckInProgress = false;
+            if (!IsDisposed && _checkForUpdatesMenuItem is not null) _checkForUpdatesMenuItem.Enabled = true;
+        }
+    }
+
+    private async Task DownloadAndInstallUpdateAsync(UpdateRelease release)
+    {
+        AppendLog($"Downloading Piper {release.Version} installer...");
+        var result = await _updates.DownloadAndVerifyInstallerAsync(release, _updatesCancellation.Token);
+        if (IsDisposed) return;
+        if (!result.IsDownloaded)
+        {
+            AppendLog($"Update download failed: {result.Error}");
+            MessageBox.Show(this, result.Error, "Piper update", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = result.InstallerPath!,
+                Arguments = $"/WAITPID={Environment.ProcessId}",
+                WorkingDirectory = Path.GetDirectoryName(result.InstallerPath),
+                UseShellExecute = true,
+            });
+            AppendLog($"Verified Piper {release.Version} installer started. Closing Piper for the update.");
+            Close();
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Could not start the verified installer: {ex.Message}");
+            MessageBox.Show(this, ex.Message, "Piper update", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private static Version CurrentVersion
+    {
+        get
+        {
+            var version = typeof(MainForm).Assembly.GetName().Version ?? new Version(0, 0, 0);
+            return new Version(version.Major, version.Minor, Math.Max(version.Build, 0));
+        }
+    }
+
     private void StartCapture()
     {
         try
@@ -1045,7 +1173,7 @@ public sealed class MainForm : Form
     {
         const string help = """
             The same query grammar works in the session filter and the Composer search.
-            Terms are combined with AND.
+            Terms are combined with AND. Ctrl+F focuses the session filter box.
 
               checkout               substring across URL, headers and text bodies
               "exact phrase"         quoted literal
@@ -1080,6 +1208,8 @@ public sealed class MainForm : Form
               is:slow  is:cached  is:body
 
               -host:cdn.example.com  negate any term with - or !
+
+            An unrecognised field is searched literally, so a pasted URL works as typed.
 
             Example:
               method:POST host:api status:>=400 -is:image body:"order"
@@ -1130,6 +1260,64 @@ public sealed class MainForm : Form
             _store.Clear();
             e.Handled = true;
         }
+    }
+
+    /// <summary>
+    /// Routes the capture list's "Hide this host" into the Filters tab's persisted Hosts list, so
+    /// the choice is still there after a restart. Following Fiddler Classic, this records the host
+    /// but never ticks "Use Filters" for the user: running a filterset stays their explicit action,
+    /// which is why the grid also gets an immediate transient term while the filterset is inactive.
+    /// </summary>
+    private void HideHost(string host)
+    {
+        // Session.Host is the raw Host header whenever the request line had no parseable URL, so it
+        // is attacker-controlled. Composing that into a query -- transiently or persisted -- would
+        // let it inject terms of its own, so refuse it before it reaches either.
+        if (!HostFilterTerm.IsFilterableHost(host))
+        {
+            AppendLog("Hide this host: that session's host is not usable as a filter pattern, "
+                + "so nothing was hidden.");
+            return;
+        }
+
+        // Hide it here and now, but leave the filterset staged rather than running it: recomposing
+        // would overwrite anything typed in the grid's own filter box, and would start dropping
+        // this host at admission (SessionStore.CompletedSessionFilter), which unticking the entry
+        // later cannot undo. As in Fiddler Classic, running a filterset stays an explicit action.
+        AppendTransientHideTerm(host);
+
+        var settings = _filterPanel.Settings;
+        var wasShowOnly = settings.HostsMode != 1;
+        if (!settings.HideHost(host))
+        {
+            AppendLog($"Hide this host: the Filters tab is showing only specific hosts, so {host} "
+                + "was hidden in the capture list only and will not be remembered.");
+            return;
+        }
+
+        _filterPanel.ApplySettings(settings);
+        // Reached both when the list had nothing ticked to begin with and when unticking the only
+        // entry that showed this host left nothing ticked, so the message states the effect only.
+        if (wasShowOnly && settings.HostsMode == 1)
+            AppendLog("Hide this host: the Filters tab's Hosts list switched to "
+                + "\"Hide the following Hosts\".");
+
+        AppendLog($"Hide this host: the Filters tab's Hosts list now hides {host}. It stays hidden "
+            + "here for this session; \"Use Filters\" there applies the list after a restart.");
+    }
+
+    /// <summary>Hides a host in the capture list only, for the rest of this session.</summary>
+    private void AppendTransientHideTerm(string host)
+    {
+        var term = $"-host:{host}";
+        var current = _sessionList.FilterText;
+        // Hiding an already hidden host is a no-op in the persisted list, so this path can be
+        // reached repeatedly; appending each time would grow the filter box without changing it.
+        // Compare whole terms: "-host:a.example.com" is not already covered by a longer term that
+        // merely starts with it, such as "-host:a.example.com.example.net".
+        if (current.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Any(existing => string.Equals(existing, term, StringComparison.OrdinalIgnoreCase))) return;
+        _sessionList.FilterText = string.IsNullOrWhiteSpace(current) ? term : $"{current} {term}";
     }
 
     private void AppendLog(string message)
@@ -1274,8 +1462,11 @@ public sealed class MainForm : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing)
+        if (disposing && !_resourcesDisposed)
         {
+            _resourcesDisposed = true;
+            _updatesCancellation.Cancel();
+            _updatesCancellation.Dispose();
             _statusTimer.Dispose();
             _ca.Dispose();
         }

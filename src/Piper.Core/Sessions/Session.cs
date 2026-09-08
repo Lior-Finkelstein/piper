@@ -50,6 +50,9 @@ public sealed class Session
     /// <summary>Set when this session was produced by the Composer rather than captured.</summary>
     public bool IsComposed { get; set; }
 
+    /// <summary>True when Piper itself checked for a published update.</summary>
+    public bool IsUpdateCheck { get; set; }
+
     /// <summary>
     /// The AutoResponder rule that answered this request, or null for ordinary traffic. Holds the
     /// rule rather than a flag because "which rule fired" is the first thing anyone asks when a
