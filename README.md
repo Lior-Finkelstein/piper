@@ -118,6 +118,13 @@ method:POST host:api status:>=400 -is:image body:"order"
 | `Ctrl+C` | copy selected URLs |
 | `Del` | remove selected sessions |
 | middle-click | send a session to the Composer |
+| `Ctrl+MouseWheel` | resize the UI font |
+| `Ctrl++` / `Ctrl+-` | resize the UI font a step at a time |
+| `Ctrl+0` | reset the UI font to 100% |
+
+**View > Zoom** does the same from the menu. The size is clamped to 70-150% - past that a window
+built from fixed row heights starts clipping its own text - and it is remembered between runs. The
+status bar shows the current percentage whenever it is not 100%.
 
 ## Testing
 

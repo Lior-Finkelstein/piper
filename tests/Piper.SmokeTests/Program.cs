@@ -543,6 +543,7 @@ await SearchQueryTests.RunAsync(runner);
 await FilterSettingsStoreTests.RunAsync(runner);
 await HostFilterHideTests.RunAsync(runner);
 await StatusBarSettingsStoreTests.RunAsync(runner);
+await FontScaleStoreTests.RunAsync(runner);
 await ProxyConfigurationSettingsStoreTests.RunAsync(runner);
 await ConnectionSettingsBlobTests.RunAsync(runner);
 await AutoResponderMatchTests.RunAsync(runner);

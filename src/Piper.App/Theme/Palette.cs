@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -30,6 +31,12 @@ public static class Palette
         Color.FromArgb(190, 55, 55), Color.FromArgb(105, 105, 112), Color.FromArgb(125, 80, 180),
         Color.FromArgb(20, 125, 125));
 
+    /// <summary>
+    /// Unscaled heights of the fixed-height rows the walk resizes. Keyed weakly so a closed dialog's
+    /// controls are not kept alive by the cache.
+    /// </summary>
+    private static readonly ConditionalWeakTable<Control, BaseHeight> BaseHeights = [];
+
     private static ThemeMode _mode = DetectWindowsTheme();
 
     public static ThemeMode Mode => _mode;
@@ -56,8 +63,29 @@ public static class Palette
     /// <summary>Rows an AutoResponder rule answered, so a faked response is obvious at a glance.</summary>
     public static Color AutoResponded => Current.AutoResponded;
 
-    public static readonly Font Mono = new("Consolas", 9.5f);
-    public static readonly Font UiFont = new("Segoe UI", 9f);
+    // Cached instances rather than a lookup per access: the owner-draw paths read these once per
+    // cell per repaint, so this has to be a field read with no allocation behind it.
+    private static Font _mono = FontScale.Scaled(FontScale.Mono);
+    private static Font _uiFont = FontScale.Scaled(FontScale.Ui);
+    private static Font _monoBold = FontScale.Scaled(FontScale.MonoBold);
+    private static Font _uiFontBold = FontScale.Scaled(FontScale.UiBold);
+
+    public static Font Mono => _mono;
+    public static Font UiFont => _uiFont;
+    public static Font MonoBold => _monoBold;
+    public static Font UiFontBold => _uiFontBold;
+
+    /// <summary>
+    /// Picks up a new <see cref="FontScale.Step"/>. Call before <see cref="Apply"/>, which is what
+    /// pushes the new fonts onto the live control tree.
+    /// </summary>
+    public static void RescaleFonts()
+    {
+        _mono = FontScale.Scaled(FontScale.Mono);
+        _uiFont = FontScale.Scaled(FontScale.Ui);
+        _monoBold = FontScale.Scaled(FontScale.MonoBold);
+        _uiFontBold = FontScale.Scaled(FontScale.UiBold);
+    }
 
     public static void ToggleMode() => SetMode(IsLightMode ? ThemeMode.Dark : ThemeMode.Light);
 
@@ -148,6 +176,9 @@ public static class Palette
         // Control exposes), so apply it everywhere this walk goes rather than one control at a time.
         DarkListView.EnableDoubleBuffering(control);
 
+        ApplyFont(control);
+        ApplyRowHeight(control);
+
         switch (control)
         {
             case TextBox textBox:
@@ -207,10 +238,72 @@ public static class Palette
         foreach (Control child in control.Controls) Apply(child);
     }
 
+    /// <summary>
+    /// Pushes the current font size onto a control.
+    /// </summary>
+    /// <remarks>
+    /// A form's own font is set outright, because WinForms cascades it to every descendant that has
+    /// not been given a font of its own -- which is most of the tree, including the session grid,
+    /// whose row height follows its font. A control that was handed a palette font explicitly gets
+    /// the current instance of that same font instead. Anything else is left alone: a control that
+    /// is merely inheriting must keep inheriting, or the cascade stops there.
+    /// </remarks>
+    private static void ApplyFont(Control control)
+    {
+        if (control is Form)
+        {
+            control.Font = UiFont;
+            return;
+        }
+
+        // Control.Font returns the parent's own instance when no font was set locally.
+        if (ReferenceEquals(control.Font, control.Parent?.Font)) return;
+        if (FontScale.Rebase(control.Font) is { } rebased) control.Font = rebased;
+    }
+
+    /// <summary>
+    /// Grows or shrinks the fixed-height docked rows the layout is built from, so scaled text is not
+    /// clipped by a row sized for the default font.
+    /// </summary>
+    /// <remarks>
+    /// ponytail: a docked single-line row has no auto-height in WinForms and there are about
+    /// thirty-five of these constants, so the walk scales them rather than each being edited by
+    /// hand. Ceiling: it deliberately leaves <see cref="SplitContainer.SplitterDistance"/>, the
+    /// splitter minimum sizes, and ListView column widths alone -- splitters are user-draggable and
+    /// the columns already expand to fit the view, so those absorb the change on their own. A dialog
+    /// whose whole client size needs to grow does that at its own call site via
+    /// <see cref="ScaleDialogSize"/>.
+    /// </remarks>
+    private static void ApplyRowHeight(Control control)
+    {
+        if (control.AutoSize || control.Dock is not (DockStyle.Top or DockStyle.Bottom)) return;
+
+        // Captured on the first visit, which is before any scaling has touched this control, so the
+        // stored value stays the unscaled one no matter how often the size changes afterwards.
+        var unscaled = BaseHeights.GetValue(control, static c => new BaseHeight(c.Height)).Value;
+        control.Height = (int)Math.Round(unscaled * FontScale.Multiplier);
+    }
+
+    /// <summary>
+    /// Scales a fixed-size dialog's client area by the current font size. Call before
+    /// <see cref="Apply"/>, from a dialog whose rows would otherwise push its buttons out of view.
+    /// </summary>
+    public static void ScaleDialogSize(Form dialog)
+    {
+        ArgumentNullException.ThrowIfNull(dialog);
+        if (FontScale.IsDefault) return;
+
+        var multiplier = FontScale.Multiplier;
+        dialog.ClientSize = new Size(
+            (int)Math.Round(dialog.ClientSize.Width * multiplier),
+            (int)Math.Round(dialog.ClientSize.Height * multiplier));
+    }
+
     private static void ApplyToolStrip(ToolStrip toolStrip)
     {
         toolStrip.BackColor = SurfaceAlt;
         toolStrip.ForeColor = Text;
+        toolStrip.Font = UiFont;
         toolStrip.Renderer = new PaletteToolStripRenderer();
         foreach (ToolStripItem item in toolStrip.Items) ApplyToolStripItem(item);
     }
@@ -219,6 +312,10 @@ public static class Palette
     {
         item.BackColor = SurfaceAlt;
         item.ForeColor = item.Enabled ? Text : TextDim;
+
+        // Items inherit the strip's font unless one was set on them directly, which only the status
+        // bar's monospaced timing label does.
+        if (FontScale.Rebase(item.Font) is { } rebased) item.Font = rebased;
 
         if (item is not ToolStripDropDownItem dropDownItem) return;
 
@@ -278,6 +375,11 @@ public static class Palette
         public override Color ButtonSelectedHighlight => Selection;
         public override Color ButtonPressedHighlight => Selection;
         public override Color CheckBackground => Selection;
+    }
+
+    private sealed class BaseHeight(int value)
+    {
+        public int Value { get; } = value;
     }
 
     private sealed record ThemeColors(

@@ -59,7 +59,7 @@ public sealed class FilterPanel : UserControl
             Text = "Use Filters when run",
             AutoSize = false,
             Padding = new Padding(6, 10, 0, 0),
-            Font = new Font(Palette.UiFont, FontStyle.Bold),
+            Font = Palette.UiFontBold,
         };
         _useFilters.CheckedChanged += (_, _) => OnCriteriaChanged();
 

@@ -60,7 +60,7 @@ public sealed class AutoResponderPanel : UserControl
             Dock = DockStyle.Fill,
             AutoSize = false,
             Padding = new Padding(6, 8, 0, 0),
-            Font = new Font(Palette.UiFont, FontStyle.Bold),
+            Font = Palette.UiFontBold,
         };
         _enabled.CheckedChanged += (_, _) => OnEdited();
 
