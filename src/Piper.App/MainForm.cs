@@ -1303,7 +1303,8 @@ public sealed class MainForm : Form
                 + "\"Hide the following Hosts\".");
 
         AppendLog($"Hide this host: the Filters tab's Hosts list now hides {host}. It stays hidden "
-            + "here for this session; \"Use Filters\" there applies the list after a restart.");
+            + "here for this session; the saved list applies when you tick \"Use Filters\" there, "
+            + "or on the next start if it is ticked already.");
     }
 
     /// <summary>Hides a host in the capture list only, for the rest of this session.</summary>
