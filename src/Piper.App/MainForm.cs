@@ -790,7 +790,6 @@ public sealed class MainForm : Form, IMessageFilter
         zoom = new ToolStripStatusLabel
         {
             BorderSides = ToolStripStatusLabelBorderSides.Left,
-            ForeColor = Palette.TextDim,
             Visible = false,
             ToolTipText = "UI font size. Ctrl+MouseWheel, or View > Zoom, to change it.",
         };
@@ -1327,6 +1326,15 @@ public sealed class MainForm : Form, IMessageFilter
                 Keys.Subtract => FontScale.ZoomOut(),
                 _ => FontScale.Reset(),
             });
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+        }
+        else if (e.Control && e.Shift && e.KeyCode is Keys.Oemplus or Keys.OemMinus)
+        {
+            // The menu accelerators are the unshifted keys, which ProcessCmdKey has already had a
+            // chance at. On a layout where "+" is Shift+=, the shifted chord reaches here instead,
+            // and the shortcut the README advertises would otherwise do nothing.
+            ChangeFontScale(e.KeyCode == Keys.Oemplus ? FontScale.ZoomIn() : FontScale.ZoomOut());
             e.Handled = true;
             e.SuppressKeyPress = true;
         }

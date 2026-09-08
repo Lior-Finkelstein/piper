@@ -22,7 +22,7 @@ public sealed class ConfigurationsDialog : Form
         Text = "Configurations";
         StartPosition = FormStartPosition.CenterParent;
         FormBorderStyle = FormBorderStyle.FixedDialog;
-        ClientSize = new Size(700, 540);
+        ClientSize = new Size(700, 600);
         MinimizeBox = false;
         MaximizeBox = false;
         ShowInTaskbar = false;

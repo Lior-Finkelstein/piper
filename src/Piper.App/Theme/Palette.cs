@@ -67,12 +67,10 @@ public static class Palette
     // cell per repaint, so this has to be a field read with no allocation behind it.
     private static Font _mono = FontScale.Scaled(FontScale.Mono);
     private static Font _uiFont = FontScale.Scaled(FontScale.Ui);
-    private static Font _monoBold = FontScale.Scaled(FontScale.MonoBold);
     private static Font _uiFontBold = FontScale.Scaled(FontScale.UiBold);
 
     public static Font Mono => _mono;
     public static Font UiFont => _uiFont;
-    public static Font MonoBold => _monoBold;
     public static Font UiFontBold => _uiFontBold;
 
     /// <summary>
@@ -83,7 +81,6 @@ public static class Palette
     {
         _mono = FontScale.Scaled(FontScale.Mono);
         _uiFont = FontScale.Scaled(FontScale.Ui);
-        _monoBold = FontScale.Scaled(FontScale.MonoBold);
         _uiFontBold = FontScale.Scaled(FontScale.UiBold);
     }
 
@@ -277,9 +274,16 @@ public static class Palette
     {
         if (control.AutoSize || control.Dock is not (DockStyle.Top or DockStyle.Bottom)) return;
 
-        // Nothing to scale at the default size. Returning early also keeps this shared walk from
-        // touching geometry at all on a theme toggle, which has no business resizing anything.
-        if (FontScale.IsDefault && !BaseHeights.TryGetValue(control, out _)) return;
+        if (FontScale.IsDefault)
+        {
+            // Back at the default size: restore the row and then forget it, so this shared walk
+            // stops touching geometry at all until a zoom change asks it to again. A theme toggle
+            // has no business resizing anything.
+            if (!BaseHeights.TryGetValue(control, out var known)) return;
+            if (control.Height != known.Value) control.Height = known.Value;
+            BaseHeights.Remove(control);
+            return;
+        }
 
         // Captured on the first visit, which is before any scaling has touched this control, so the
         // stored value stays the unscaled one no matter how often the size changes afterwards.

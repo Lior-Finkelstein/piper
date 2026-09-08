@@ -12,8 +12,8 @@ namespace Piper.App.Theme;
 /// Fonts issued here are created once per (base font, step) pair and <b>never disposed</b>. Controls
 /// and <c>ToolStripItem</c>s hold a raw reference to whatever font was assigned and WinForms never
 /// clones one, so freeing the previous font on a zoom change would leave dangling GDI handles behind
-/// in every control still pointing at it. The cache bounds the cost instead: four base fonts across
-/// nine steps is at most 36 handles for the lifetime of the process, and
+/// in every control still pointing at it. The cache bounds the cost instead: three base fonts across
+/// nine steps is at most 27 handles for the lifetime of the process, and
 /// <see cref="Palette"/>'s fonts were already never-disposed statics.
 /// </para>
 /// <para>
@@ -31,14 +31,12 @@ internal static class FontScale
     [
         new("Consolas", 9.5f, FontStyle.Regular, GraphicsUnit.Point),
         new("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point),
-        new("Consolas", 9.5f, FontStyle.Bold, GraphicsUnit.Point),
         new("Segoe UI", 9f, FontStyle.Bold, GraphicsUnit.Point),
     ];
 
     public const int Mono = 0;
     public const int Ui = 1;
-    public const int MonoBold = 2;
-    public const int UiBold = 3;
+    public const int UiBold = 2;
 
     private static readonly Dictionary<(int BaseIndex, int Step), Font> Cache = [];
 
