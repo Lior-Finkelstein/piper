@@ -8,7 +8,7 @@ using Piper.Core.Sessions;
 
 namespace Piper.App;
 
-public sealed class MainForm : Form
+public sealed class MainForm : Form, IMessageFilter
 {
     private readonly SessionStore _store = new();
     private readonly ProxyOptions _options = new();
@@ -26,6 +26,11 @@ public sealed class MainForm : Form
     private readonly TextBox _logView;
     private readonly DarkTabControl _rightTabs;
 
+    private readonly ToolStripStatusLabel _zoomLabel;
+    private ToolStripMenuItem? _zoomInItem;
+    private ToolStripMenuItem? _zoomOutItem;
+    private ToolStripMenuItem? _zoomResetItem;
+    private int _wheelRemainder;
     private readonly ToolStripStatusLabel _statusLabel;
     private readonly ToolStripStatusLabel _captureStatusLabel;
     private readonly ToolStripStatusLabel _captureScopeLabel;
@@ -55,6 +60,16 @@ public sealed class MainForm : Form
 
     public MainForm()
     {
+        // Before any control exists: every control that asks the palette for a font during
+        // construction then gets the saved size straight away, so the existing Palette.Apply below
+        // has nothing left to correct.
+        if (FontScaleSettingsStore.Load() is { } fontScale)
+        {
+            FontScale.SetStep(fontScale.Step);
+            FontScale.WheelEnabled = fontScale.WheelZoomEnabled;
+        }
+        Palette.RescaleFonts();
+
         DoubleBuffered = true;
         Text = "Piper";
         Width = 1500;
@@ -127,7 +142,7 @@ public sealed class MainForm : Form
 
         var toolbar = BuildToolbar();
         var statusBar = BuildStatusBar(out _statusLabel, out _captureStatusLabel, out _captureScopeLabel,
-            out _breakpointsLabel, out _sessionsLabel, out _selectedSessionDetailsLabel);
+            out _breakpointsLabel, out _sessionsLabel, out _selectedSessionDetailsLabel, out _zoomLabel);
         _captureStatusLabel.Click += (_, _) => ToggleCapture();
         _captureScopeLabel.Click += (_, _) => ShowCaptureScopeMenu();
         ApplyCaptureScope();
@@ -161,14 +176,21 @@ public sealed class MainForm : Form
             _composer.LoadSession(session);
         };
 
-        // Known simplification: applying a Filterset writes straight into the same FilterText
-        // the grid's own ad-hoc filter box uses, so it overwrites anything typed there by hand,
-        // and the two are never combined. FilterPanel stages edits until Actions applies them.
+        // The filterset gets its own visibility slot rather than the grid's ad-hoc filter box.
+        // Writing it into FilterText destroyed whatever the user had typed there, and worse, let
+        // them edit or clear the box and believe the filterset was off while CompletedSessionFilter
+        // kept discarding traffic at admission. Both now come from the same query and the search
+        // box stays theirs. FilterPanel stages criteria edits until Actions or the Use Filters
+        // switch applies them.
         _filterPanel.FilterChanged += (_, query) =>
         {
-            _sessionList.FilterText = query;
             var admissionQuery = SearchQuery.Parse(query);
+            _sessionList.FiltersetFilter = admissionQuery.IsEmpty ? null : admissionQuery.Matches;
             _store.CompletedSessionFilter = admissionQuery.IsEmpty ? null : admissionQuery.Matches;
+            // Keep this save unconditional. The Use Filters checkbox no longer raises
+            // SettingsChanged, so this is the only path that persists it: making the save depend
+            // on a non-empty query would stop unticking from being written, and the filterset
+            // would come back applied on the next start.
             FilterSettingsStore.Save(_filterPanel.Settings);
             _rightTabs.SetTabChecked(filtersPage, !admissionQuery.IsEmpty);
         };
@@ -210,7 +232,13 @@ public sealed class MainForm : Form
         KeyPreview = true;
         KeyDown += OnFormKeyDown;
 
+        // Ctrl+wheel cannot be picked up by KeyPreview or ProcessCmdKey, and WM_MOUSEWHEEL goes to
+        // whichever control has focus, so a message filter is the only hook that covers the whole
+        // window -- including the third-party hex viewer -- without subscribing to every control.
+        Application.AddMessageFilter(this);
+
         Palette.Apply(this);
+        UpdateZoomStatus();
         AppendLog($"Root CA: {_ca.RootPfxPath}");
         AppendLog(TrustStore.IsTrusted(_ca.RootCertificate)
             ? "Root CA is trusted by the current user. HTTPS decryption will work."
@@ -428,6 +456,13 @@ public sealed class MainForm : Form
         tools.DropDownItems.Add(hosts);
         tools.DropDownItems.Add(new ToolStripSeparator());
         // Fiddler puts TextWizard on Ctrl+E; that is already send-to-Composer here, so Ctrl+T it is.
+        // Ctrl+F is deliberately not a menu shortcut: a menu accelerator fires before the focused
+        // control sees the key, and the Composer and inspector searches own Ctrl+F for themselves.
+        tools.DropDownItems.Add(new ToolStripMenuItem("&Find sessions...", null,
+            (_, _) => _sessionList.ShowFindSessions())
+        {
+            ShortcutKeyDisplayString = "Ctrl+F",
+        });
         tools.DropDownItems.Add(new ToolStripMenuItem("&TextWizard...", null, (_, _) => TextWizardDialog.Open(this))
         {
             ShortcutKeys = Keys.Control | Keys.T,
@@ -444,9 +479,37 @@ public sealed class MainForm : Form
             "Piper\r\n\r\nAn HTTP(S) debugging proxy written from scratch on .NET 10.",
             "About Piper", MessageBoxButtons.OK, MessageBoxIcon.Information));
 
-        menu.Items.AddRange([file, BuildRulesMenu(), tools, help]);
+        menu.Items.AddRange([file, BuildRulesMenu(), BuildViewMenu(), tools, help]);
         return menu;
     }
+
+    /// <summary>
+    /// The discoverable half of font zoom. Menu accelerators route through ProcessCmdKey, so these
+    /// fire even with a text box focused, and the shortcuts are written down where a wheel gesture
+    /// could not be.
+    /// </summary>
+    private ToolStripMenuItem BuildViewMenu()
+    {
+        var view = new ToolStripMenuItem("&View");
+        _zoomInItem = NewZoomItem("Zoom &in", Keys.Control | Keys.Oemplus, "Ctrl++", FontScale.ZoomIn);
+        _zoomOutItem = NewZoomItem("Zoom &out", Keys.Control | Keys.OemMinus, "Ctrl+-", FontScale.ZoomOut);
+        _zoomResetItem = NewZoomItem("&Reset zoom", Keys.Control | Keys.D0, "Ctrl+0", FontScale.Reset);
+        view.DropDownItems.AddRange([_zoomInItem, _zoomOutItem, new ToolStripSeparator(), _zoomResetItem]);
+        UpdateZoomMenu();
+        return view;
+    }
+
+    /// <summary>
+    /// A zoom command. The display string is set by hand because WinForms renders
+    /// <see cref="Keys.Oemplus"/> and <see cref="Keys.OemMinus"/> under those names rather than as
+    /// the "+" and "-" printed on the key.
+    /// </summary>
+    private ToolStripMenuItem NewZoomItem(string text, Keys shortcut, string display, Func<bool> change) =>
+        new(text, null, (_, _) => ChangeFontScale(change()))
+        {
+            ShortcutKeys = shortcut,
+            ShortcutKeyDisplayString = display,
+        };
 
     private ToolStripMenuItem BuildRulesMenu()
     {
@@ -524,6 +587,7 @@ public sealed class MainForm : Form
             MaximizeBox = false,
             ShowInTaskbar = false,
         };
+        Palette.ScaleDialogSize(prompt);
         var label = new Label { Dock = DockStyle.Top, Height = 38, Text = "Use this User-Agent for all proxied requests:", Padding = new Padding(14, 12, 0, 0) };
         var value = new TextBox { Dock = DockStyle.Top, Height = 30, Text = _options.GlobalUserAgent ?? string.Empty, Margin = new Padding(12), Font = Palette.Mono };
         var save = new Button { Text = "Save", DialogResult = DialogResult.OK, Size = new Size(100, 34) };
@@ -552,6 +616,7 @@ public sealed class MainForm : Form
     private void ShowConfigurations()
     {
         using var dialog = new ConfigurationsDialog(_options, _captureEnabledOnStartup, _captureScope.ToString(),
+            FontScale.WheelEnabled,
             TrustRootCertificate, UntrustRootCertificate, ExportRootCertificate, OpenCertificateFolder);
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
 
@@ -565,6 +630,8 @@ public sealed class MainForm : Form
             CaptureScope = _captureScope.ToString(),
         });
         ProxyConfigurationSettingsStore.Save(ProxyConfigurationSettings.From(_options));
+        FontScale.WheelEnabled = dialog.WheelZoom;
+        SaveFontScaleSettings();
         AppendLog("Configurations saved. HTTPS protocol changes apply to new connections.");
     }
 
@@ -724,7 +791,7 @@ public sealed class MainForm : Form
     private static StatusStrip BuildStatusBar(out ToolStripStatusLabel status,
         out ToolStripStatusLabel capture, out ToolStripStatusLabel scope,
         out ToolStripStatusLabel breakpoints, out ToolStripStatusLabel sessions,
-        out ToolStripStatusLabel selectedSessionDetails)
+        out ToolStripStatusLabel selectedSessionDetails, out ToolStripStatusLabel zoom)
     {
         var bar = new StatusStrip { Font = Palette.UiFont };
         status = new ToolStripStatusLabel("Starting...") { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
@@ -751,9 +818,15 @@ public sealed class MainForm : Form
             Visible = false,
             ToolTipText = "Timing and transfer details for the selected session.",
         };
+        zoom = new ToolStripStatusLabel
+        {
+            BorderSides = ToolStripStatusLabelBorderSides.Left,
+            Visible = false,
+            ToolTipText = "UI font size. Ctrl+MouseWheel, or View > Zoom, to change it.",
+        };
         // The live proxy status expands through the centre; placing selected-session details
         // after it pins the timing/transfer summary to the status bar's right edge.
-        bar.Items.AddRange([capture, scope, breakpoints, sessions, status, selectedSessionDetails]);
+        bar.Items.AddRange([capture, scope, breakpoints, sessions, status, selectedSessionDetails, zoom]);
         return bar;
     }
 
@@ -1188,8 +1261,12 @@ public sealed class MainForm : Form
     private void ShowSearchHelp()
     {
         const string help = """
-            The same query grammar works in the session filter and the Composer search.
-            Terms are combined with AND. Ctrl+F focuses the session filter box.
+            The same query grammar works in Find Sessions, the session filter box and the
+            Composer search. Terms are combined with AND.
+
+            Ctrl+F opens Find Sessions: it marks matching sessions in a colour you pick and
+            hides nothing. F3 selects the next match. Ctrl+Shift+F focuses the filter box,
+            which does hide the sessions that do not match.
 
               checkout               substring across URL, headers and text bodies
               "exact phrase"         quoted literal
@@ -1276,6 +1353,112 @@ public sealed class MainForm : Form
             _store.Clear();
             e.Handled = true;
         }
+        else if (e.Control && e.KeyCode is Keys.Add or Keys.Subtract or Keys.NumPad0)
+        {
+            ChangeFontScale(e.KeyCode switch
+            {
+                Keys.Add => FontScale.ZoomIn(),
+                Keys.Subtract => FontScale.ZoomOut(),
+                _ => FontScale.Reset(),
+            });
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+        }
+        else if (e.Control && e.Shift && e.KeyCode is Keys.Oemplus or Keys.OemMinus)
+        {
+            // The menu accelerators are the unshifted keys, which ProcessCmdKey has already had a
+            // chance at. On a layout where "+" is Shift+=, the shifted chord reaches here instead,
+            // and the shortcut the README advertises would otherwise do nothing.
+            ChangeFontScale(e.KeyCode == Keys.Oemplus ? FontScale.ZoomIn() : FontScale.ZoomOut());
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+        }
+    }
+
+    /// <summary>
+    /// Ctrl+MouseWheel resizes the UI. The wheel message goes to the focused control rather than the
+    /// one under the pointer, so this filter is what makes the gesture work anywhere in the window;
+    /// swallowing the message stops that control from scrolling at the same time.
+    /// </summary>
+    /// <remarks>
+    /// The video preview hosts its own browser window out of process, so a Ctrl+wheel over that tab
+    /// never reaches this filter and keeps the player's own behaviour.
+    /// </remarks>
+    public bool PreFilterMessage(ref Message m)
+    {
+        const int WmMouseWheel = 0x020A;
+        const int WheelDelta = 120;
+        if (m.Msg != WmMouseWheel || ModifierKeys != Keys.Control) return false;
+        if (!FontScale.WheelEnabled) return false;
+
+        var delta = (short)((long)m.WParam >> 16);
+        if (delta == 0) return false;
+
+        // Accumulated against one detent rather than treated as a direction: a precision touchpad
+        // reports fractions of a notch, and stepping a full 10% per message would run the whole
+        // range in one gesture. Reversing direction drops the partial notch so the pointer does not
+        // feel sticky.
+        if (Math.Sign(delta) != Math.Sign(_wheelRemainder)) _wheelRemainder = 0;
+        _wheelRemainder += delta;
+
+        while (Math.Abs(_wheelRemainder) >= WheelDelta)
+        {
+            var up = _wheelRemainder > 0;
+            _wheelRemainder -= up ? WheelDelta : -WheelDelta;
+            ChangeFontScale(up ? FontScale.ZoomIn() : FontScale.ZoomOut());
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Pushes a new font size onto the live control tree. Mirrors <see cref="ToggleTheme"/>: the
+    /// palette re-walks the tree and everything repaints.
+    /// </summary>
+    private void ChangeFontScale(bool changed)
+    {
+        if (!changed) return;
+
+        Palette.RescaleFonts();
+        Palette.Apply(this);
+        UpdateZoomStatus();
+        UpdateZoomMenu();
+        InvalidateTheme(this);
+    }
+
+    /// <summary>
+    /// Keeps the View menu's zoom commands in step with the current size.
+    /// </summary>
+    /// <remarks>
+    /// This has to run on every change, not just when the menu opens: a disabled
+    /// <see cref="ToolStripMenuItem"/> does not fire its <see cref="ToolStripMenuItem.ShortcutKeys"/>,
+    /// so refreshing only in <c>DropDownOpening</c> would leave Ctrl+0 dead after the menu had once
+    /// been opened at 100%, and Ctrl+Plus dead after it had been opened at the top clamp.
+    /// </remarks>
+    private void UpdateZoomMenu()
+    {
+        if (_zoomInItem is null || _zoomOutItem is null || _zoomResetItem is null) return;
+
+        // Greying out at the clamp says the range is deliberate rather than the key being broken.
+        _zoomInItem.Enabled = FontScale.Step < FontScaleSettingsStore.MaxStep;
+        _zoomOutItem.Enabled = FontScale.Step > FontScaleSettingsStore.MinStep;
+        _zoomResetItem.Enabled = !FontScale.IsDefault;
+        _zoomResetItem.Text = FontScale.IsDefault ? "&Reset zoom" : $"&Reset zoom (now {FontScale.Percent}%)";
+    }
+
+    private static void SaveFontScaleSettings() => FontScaleSettingsStore.Save(new FontScaleSettings
+    {
+        Step = FontScale.Step,
+        WheelZoomEnabled = FontScale.WheelEnabled,
+    });
+
+    private void UpdateZoomStatus()
+    {
+        // Only worth the space when it is not the default, so a stray Ctrl+wheel is explainable
+        // rather than mysterious. The text is cleared rather than left stale behind a hidden label,
+        // because accessibility tools still report the text of one that is merely not visible.
+        _zoomLabel.Text = FontScale.IsDefault ? string.Empty : $"Zoom {FontScale.Percent}%";
+        _zoomLabel.Visible = !FontScale.IsDefault;
     }
 
     /// <summary>
@@ -1297,29 +1480,29 @@ public sealed class MainForm : Form
         }
 
         // Hide it here and now, but leave the filterset staged rather than running it: recomposing
-        // would overwrite anything typed in the grid's own filter box, and would start dropping
-        // this host at admission (SessionStore.CompletedSessionFilter), which unticking the entry
-        // later cannot undo. As in Fiddler Classic, running a filterset stays an explicit action.
+        // would start dropping this host at admission (SessionStore.CompletedSessionFilter), which
+        // unticking the entry later cannot undo. As in Fiddler Classic, running a filterset stays
+        // an explicit action.
         AppendTransientHideTerm(host);
 
         var settings = _filterPanel.Settings;
         var wasShowOnly = settings.HostsMode != 1;
         if (!settings.HideHost(host))
         {
-            AppendLog($"Hide this host: the Filters tab is showing only specific hosts, so {host} "
-                + "was hidden in the capture list only and will not be remembered.");
+            AppendLog($"Hide this host: {host} is hidden in the capture list for this session only. "
+                + "The Filters tab is showing only specific hosts, which cannot also carry an "
+                + "exception, so switch its Hosts list to \"Hide the following Hosts\" to keep it.");
             return;
         }
 
         _filterPanel.ApplySettings(settings);
-        // Reached both when the list had nothing ticked to begin with and when unticking the only
-        // entry that showed this host left nothing ticked, so the message states the effect only.
         if (wasShowOnly && settings.HostsMode == 1)
-            AppendLog("Hide this host: the Filters tab's Hosts list switched to "
-                + "\"Hide the following Hosts\".");
+            AppendLog("Hide this host: the Filters tab's Hosts list had nothing ticked, so it "
+                + "switched to \"Hide the following Hosts\".");
 
         AppendLog($"Hide this host: the Filters tab's Hosts list now hides {host}. It stays hidden "
-            + "here for this session; \"Use Filters\" there applies the list after a restart.");
+            + "here for this session; the saved list applies when you tick \"Use Filters\" there, "
+            + "or on the next start if it is ticked already.");
     }
 
     /// <summary>Hides a host in the capture list only, for the rest of this session.</summary>
@@ -1388,6 +1571,7 @@ public sealed class MainForm : Form
         }
 
         SaveWindowBounds();
+        SaveFontScaleSettings();
 
         // Windows shutdown, Task Manager and Application.Exit do not honour a cancelled close:
         // deferring the cleanup to a continuation there would let the process go away with the
@@ -1481,6 +1665,7 @@ public sealed class MainForm : Form
         if (disposing && !_resourcesDisposed)
         {
             _resourcesDisposed = true;
+            Application.RemoveMessageFilter(this);
             _updatesCancellation.Cancel();
             _updatesCancellation.Dispose();
             _statusTimer.Dispose();

@@ -83,6 +83,15 @@ turn it back on once you're done testing.
 
 ## Search grammar
 
+**Find Sessions** (`Ctrl+F`, or **Tools > Find sessions**) searches without hiding anything: it
+marks every match in a colour you pick - yellow, orange, red, green, blue, purple or gray - and
+optionally selects them. `F3` steps to the next match, and **Clear find marks** on the session
+right-click menu removes the marks. Choosing *No highlight* unmarks the sessions a find matches.
+A find can be scoped to headers, bodies, one side of the exchange, or URLs only.
+
+The **filter** box above the session list (`Ctrl+Shift+F`) uses the same grammar but hides every
+session that does not match.
+
 Terms are ANDed. Prefix any term with `-` or `!` to negate it.
 
 | Form | Example | Matches |
@@ -117,7 +126,9 @@ method:POST host:api status:>=400 -is:image body:"order"
 | Key | Action |
 | --- | --- |
 | `F12` | start / stop capturing |
-| `Ctrl+F` | focus the session filter box (with the session list focused) |
+| `Ctrl+F` | open Find Sessions, marking matches (with the session list focused) |
+| `F3` | select the next session matching the last find |
+| `Ctrl+Shift+F` | focus the session filter box, hiding non-matches |
 | `Ctrl+K` | jump to the Composer search |
 | `Ctrl+E` | send the selected session to the Composer |
 | `Ctrl+T` | open the TextWizard |
@@ -126,6 +137,17 @@ method:POST host:api status:>=400 -is:image body:"order"
 | `Ctrl+C` | copy selected URLs |
 | `Del` | remove selected sessions |
 | middle-click / double-click | send a session to the Composer |
+| `Ctrl+MouseWheel` | resize the UI font |
+| `Ctrl++` / `Ctrl+-` | resize the UI font a step at a time |
+| `Ctrl+0` | reset the UI font to 100% |
+
+**View > Zoom** does the same from the menu. The size is clamped to 70-150% - past that a window
+built from fixed row heights starts clipping its own text - and it is remembered between runs. The
+status bar shows the current percentage whenever it is not 100%.
+
+If Ctrl+MouseWheel gets in the way while scrolling, turn it off under
+**Tools > Configurations > General**. The menu and the keyboard shortcuts keep working, so the size
+is still reachable.
 
 ## Testing
 

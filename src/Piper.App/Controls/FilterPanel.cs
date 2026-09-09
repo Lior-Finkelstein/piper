@@ -56,12 +56,22 @@ public sealed class FilterPanel : UserControl
         _useFilters = new CheckBox
         {
             Dock = DockStyle.Fill,
-            Text = "Use Filters when run",
+            Text = "Use Filters",
             AutoSize = false,
             Padding = new Padding(6, 10, 0, 0),
-            Font = new Font(Palette.UiFont, FontStyle.Bold),
+            Font = Palette.UiFontBold,
         };
-        _useFilters.CheckedChanged += (_, _) => OnCriteriaChanged();
+        // The global switch is live in both directions, matching Fiddler: unchecking stops
+        // filtering at once (leaving a filterset applied after the user disables it keeps
+        // SessionStore discarding non-matching completed sessions, which is unrecoverable), and
+        // checking runs the staged criteria the same way Actions > Run Filterset now does. The
+        // criteria themselves stay staged, so a half-typed host pattern is never applied on its own.
+        // MainForm's FilterChanged handler persists Settings, so this must not also raise
+        // SettingsChanged or every toggle would save twice.
+        _useFilters.CheckedChanged += (_, _) =>
+        {
+            if (!_applyingSettings) ApplyFilterset();
+        };
 
         // ---------------------------------------------------------------- Hosts
 
@@ -207,16 +217,26 @@ public sealed class FilterPanel : UserControl
     {
         // Adding hosts should make the expected path simple: Actions > Run activates the staged
         // filterset even when the user has not separately ticked the global checkbox.
-        _useFilters.Checked = true;
-        ApplyFilterset();
+        SetUseFilters(true);
+    }
+
+    /// <summary>
+    /// Moves the switch to <paramref name="useFilters"/> and applies the filterset exactly once.
+    /// Assigning the checkbox raises CheckedChanged, which applies on its own, so an unconditional
+    /// apply here would refilter the whole grid and rewrite the settings file twice per command.
+    /// A no-op assignment raises nothing, so that case still has to apply explicitly.
+    /// </summary>
+    private void SetUseFilters(bool useFilters)
+    {
+        if (_useFilters.Checked == useFilters) ApplyFilterset();
+        else _useFilters.Checked = useFilters;
     }
 
     private void ShowAllSessions()
     {
         // Preserve every host and status choice for a later run; only the applied query is
         // cleared. This makes it safe to temporarily inspect the full capture list.
-        _useFilters.Checked = false;
-        ApplyFilterset();
+        SetUseFilters(false);
     }
 
     private void LoadFilterset()
@@ -232,7 +252,16 @@ public sealed class FilterPanel : UserControl
         {
             var json = File.ReadAllText(dialog.FileName);
             var settings = JsonSerializer.Deserialize<FilterSettings>(json);
-            if (settings is not null) ApplySettings(settings);
+            if (settings is null) return;
+
+            // A filterset carries its own enabled state, so applying it is part of loading it.
+            // Staging only would leave the previous query on SessionStore.CompletedSessionFilter:
+            // the panel would show the loaded criteria while capture kept dropping traffic by the
+            // old ones, and a filterset saved with Use Filters off would not stop the filtering it
+            // is meant to describe. Loading from Actions is an explicit user action, like the
+            // switch itself, so it applies rather than staging.
+            ApplySettings(settings);
+            ApplyFilterset();
         }
         catch (Exception ex)
         {
@@ -264,20 +293,32 @@ public sealed class FilterPanel : UserControl
 
     private void ShowHelp() => MessageBox.Show(this,
         "Add one or more host patterns, then use their checkboxes to choose which ones apply. "
-        + "Changes stay staged until Actions > Run Filterset now. Actions > Show all sessions "
-        + "removes the applied filter without discarding the filterset.\r\n\r\n"
+        + "Host and Response Status Code edits stay staged, so a partly-typed pattern is never "
+        + "applied on its own.\r\n\r\n"
+        + "The Use Filters checkbox takes effect immediately in both directions. Checking it "
+        + "runs the staged filterset straight away, exactly as Actions > Run Filterset now does; "
+        + "unchecking it stops filtering at once, as does Actions > Show all sessions, which "
+        + "leaves the filterset itself intact.\r\n\r\n"
         + "Right-clicking a session and choosing \"Hide this host\" hides it in the capture list "
         + "right away and adds it here, so the choice is remembered. Like the rest of the "
         + "filterset the list applies once \"Use Filters\" is on; untick or remove the entry to "
-        + "undo it.\r\n\r\n"
-        + "Filters compose into the same query grammar as the session grid's own filter box, "
-        + "so running a filterset overwrites anything typed there by hand.\r\n\r\n"
+        + "undo it. While this list is showing only specific hosts it cannot also carry an "
+        + "exception, so a hide then lasts for the session only and the Log says so.\r\n\r\n"
+        + "Filtered-out sessions are dropped rather than hidden, so traffic captured while a "
+        + "filter is applied cannot be recovered by turning the filter off afterwards. Check "
+        + "your host and status choices before enabling the filterset.\r\n\r\n"
+        + "Filters compose into the same query grammar as the session grid's own filter box, but "
+        + "apply separately: running a filterset leaves whatever you typed there alone, and both "
+        + "narrow the list together. Editing that box does not turn the filterset off -- use the "
+        + "Use Filters checkbox for that.\r\n\r\n"
         + "Only Hosts and Response Status Code filters are implemented.",
         "Filters", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
-    /// <summary>Applies the currently staged filterset; this is intentionally Actions-only.</summary>
-    private void ApplyFilterset() =>
-        FilterChanged?.Invoke(this, _useFilters.Checked ? ComposeQuery() : string.Empty);
+    /// <summary>
+    /// Applies the staged filterset, or clears the applied query when Use Filters is off.
+    /// Reached from the Actions commands, from the Use Filters switch, and once at startup.
+    /// </summary>
+    private void ApplyFilterset() => FilterChanged?.Invoke(this, FilterQuery.Compose(Settings));
 
     /// <summary>Applies restored settings at startup without changing their enabled state.</summary>
     public void ApplyCurrentFilterset() => ApplyFilterset();
@@ -296,7 +337,9 @@ public sealed class FilterPanel : UserControl
             var hosts = savedHosts.Count > 0
                 ? savedHosts
                 : HostFilterTerm.Split(settings.HostsText).Select(pattern => new HostFilterEntry { Pattern = pattern }).ToList();
-            foreach (var host in hosts.Where(host => !string.IsNullOrWhiteSpace(host.Pattern)))
+            // A hand-edited or truncated file can carry null entries and blank patterns, the same
+            // hazard FilterSettings.HideHost guards against, so skip them rather than dereference.
+            foreach (var host in hosts.Where(host => !string.IsNullOrWhiteSpace(host?.Pattern)))
                 _hostsList.Items.Add(host.Pattern.Trim(), host.Enabled);
 
             _hideSuccess.Checked = settings.HideSuccess;
@@ -355,24 +398,4 @@ public sealed class FilterPanel : UserControl
             };
         }
     }
-
-    private string ComposeQuery()
-    {
-        var terms = new List<string>();
-
-        var hostsTerm = ComposeHostsTerm();
-        if (hostsTerm.Length > 0) terms.Add(hostsTerm);
-
-        if (_hideSuccess.Checked) terms.Add("-status:200..299");
-        if (_hideNonSuccess.Checked) terms.Add("status:200..299");
-        if (_hideRedirects.Checked) terms.Add("-status:300..303 -status:307");
-        if (_hideAuthDemands.Checked) terms.Add("-status:401 -status:407");
-        if (_hideNotModified.Checked) terms.Add("-status:304");
-
-        return string.Join(' ', terms);
-    }
-
-    private string ComposeHostsTerm() => HostFilterTerm.Compose(
-        string.Join(';', HostEntries().Where(host => host.Enabled).Select(host => host.Pattern)),
-        hide: _hostsMode.SelectedIndex == 1);
 }

@@ -149,7 +149,7 @@ public sealed class ComposerPanel : UserControl
             Height = 28,
             Text = "  Composer History",
             ForeColor = Palette.Text,
-            Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+            Font = Palette.UiFontBold,
             Padding = new Padding(0, 5, 0, 0),
         };
 
@@ -220,7 +220,7 @@ public sealed class ComposerPanel : UserControl
             Height = 22,
             Text = "  Body",
             ForeColor = Palette.Text,
-            Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+            Font = Palette.UiFontBold,
             Padding = new Padding(0, 4, 0, 0),
         };
         var bodyPane = new Panel { Dock = DockStyle.Fill };
