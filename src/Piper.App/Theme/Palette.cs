@@ -63,6 +63,11 @@ public static class Palette
     /// <summary>Rows an AutoResponder rule answered, so a faked response is obvious at a glance.</summary>
     public static Color AutoResponded => Current.AutoResponded;
 
+    /// <summary>Text drawn on a row the Find Sessions dialog marked. The mark colours are chosen
+    /// by the user rather than by the theme, so one near-black keeps every column readable on
+    /// them, the status colours included.</summary>
+    public static readonly Color MarkedRowText = Color.FromArgb(20, 20, 20);
+
     // Cached instances rather than a lookup per access: the owner-draw paths read these once per
     // cell per repaint, so this has to be a field read with no allocation behind it.
     private static Font _mono = FontScale.Scaled(FontScale.Mono);

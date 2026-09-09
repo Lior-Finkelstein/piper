@@ -67,7 +67,33 @@ public sealed class SearchQuery
     public IEnumerable<Session> Filter(IEnumerable<Session> sessions) =>
         IsEmpty ? sessions : sessions.Where(Matches);
 
-    public static SearchQuery Parse(string? query)
+    /// <summary>
+    /// Index of the first match after <paramref name="startAfter"/>, wrapping around to the start
+    /// of the list; -1 when nothing matches. Drives "jump to the next highlighted row", so an
+    /// out-of-range <paramref name="startAfter"/> (nothing selected yet) simply searches from the top.
+    /// </summary>
+    public int NextMatchIndex(IReadOnlyList<Session> sessions, int startAfter)
+    {
+        if (IsEmpty || sessions.Count == 0) return -1;
+
+        var first = startAfter < 0 || startAfter >= sessions.Count ? 0 : startAfter + 1;
+        for (var offset = 0; offset < sessions.Count; offset++)
+        {
+            var index = (first + offset) % sessions.Count;
+            if (Matches(sessions[index])) return index;
+        }
+
+        return -1;
+    }
+
+    public static SearchQuery Parse(string? query) => Parse(query, null);
+
+    /// <summary>
+    /// Parses <paramref name="query"/> with bare terms restricted to <paramref name="defaultField"/>
+    /// -- the Find Sessions dialog's search scope. A term that names its own field keeps it, so a
+    /// scoped find can still mix in <c>status:</c> or <c>host:</c>.
+    /// </summary>
+    public static SearchQuery Parse(string? query, string? defaultField)
     {
         if (string.IsNullOrWhiteSpace(query)) return Empty;
 
@@ -77,8 +103,12 @@ public sealed class SearchQuery
         var fields = new List<string>();
         var isValues = new List<string>();
 
-        foreach (var token in Tokenize(query))
+        foreach (var parsed in Tokenize(query))
         {
+            var token = parsed.Field is null && defaultField is not null
+                ? parsed with { Field = defaultField }
+                : parsed;
+
             if (token.Field is { } field)
             {
                 if (!fields.Contains(field)) fields.Add(field);

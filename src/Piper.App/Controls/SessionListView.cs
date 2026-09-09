@@ -20,16 +20,25 @@ public sealed class SessionListView : UserControl
     private static readonly int[] ColumnMinimumWidths = [52, 55, 62, 170, 300, 130, 110, 80, 70];
     private static readonly int[] ColumnGrowthWeights = [0, 0, 0, 3, 6, 2, 2, 0, 0];
 
+    /// <summary>Ceiling on how many matches a find selects. Marking is unlimited.</summary>
+    private const int MaxSelectedMatches = 2_000;
+
     private readonly ListView _list;
     private readonly TextBox _filterBox;
     private readonly SessionStore _store;
     private readonly SolidBrush _surfaceBrush = new(Palette.Surface);
     private readonly SolidBrush _selectionBrush = new(Palette.Selection);
+    private readonly SolidBrush _markBrush = new(FindSessionsDialog.DefaultMarkColour);
     private readonly SolidBrush _headerBrush = new(Palette.SurfaceAlt);
     private readonly Pen _headerBorderPen = new(Palette.Border);
 
     private readonly List<Session> _visible = new(1024);
+    // Find marks, keyed by session id rather than row index: rows are rebuilt from the store
+    // several times a second, and a session's id survives that where its position does not.
+    private readonly Dictionary<int, Color> _marks = [];
     private SearchQuery _query = SearchQuery.Empty;
+    private SearchQuery _findQuery = SearchQuery.Empty;
+    private FindSessionsRequest _lastFind = FindSessionsRequest.Default;
     private Func<Session, bool>? _visibilityFilter;
     private Func<Session, bool>? _filtersetFilter;
     private bool _autoScroll = true;
@@ -261,6 +270,123 @@ public sealed class SessionListView : UserControl
         Rebuild();
     }
 
+    /// <summary>
+    /// Opens the Find Sessions dialog and applies what it asked for. Unlike the filter box this
+    /// hides nothing: matches are marked in the chosen colour and, optionally, selected.
+    /// </summary>
+    public void ShowFindSessions()
+    {
+        if (FindSessionsDialog.Prompt(FindForm(), _lastFind) is not { } request) return;
+
+        _lastFind = request;
+        _findQuery = SearchQuery.Parse(request.Query, request.Scope);
+        ApplyFind(request);
+    }
+
+    /// <summary>Selects the next session matching the last find, wrapping at the end of the list.
+    /// Opens the dialog instead when nothing has been searched for yet.</summary>
+    public void FindNext()
+    {
+        if (_findQuery.IsEmpty)
+        {
+            ShowFindSessions();
+            return;
+        }
+
+        var startAfter = _list.SelectedIndices.Count > 0 ? _list.SelectedIndices[^1] : -1;
+        var index = _findQuery.NextMatchIndex(_visible, startAfter);
+        if (index < 0) return;
+
+        SelectOnlyIndices([index]);
+    }
+
+    /// <summary>Removes every find mark. The sessions themselves are untouched.</summary>
+    public void ClearMarks()
+    {
+        if (_marks.Count == 0) return;
+        _marks.Clear();
+        _list.Invalidate();
+    }
+
+    private void ApplyFind(FindSessionsRequest request)
+    {
+        var matches = new List<int>();
+        for (var index = 0; index < _visible.Count; index++)
+        {
+            if (!_findQuery.Matches(_visible[index])) continue;
+            matches.Add(index);
+            if (request.Highlight is { } colour) _marks[_visible[index].Id] = colour;
+            else _marks.Remove(_visible[index].Id);
+        }
+
+        _list.Invalidate();
+
+        if (matches.Count == 0)
+        {
+            var message = _findQuery.Warnings.Count > 0
+                ? "No sessions matched." + Environment.NewLine + Environment.NewLine
+                    + string.Join(Environment.NewLine, _findQuery.Warnings)
+                : "No sessions matched.";
+            MessageBox.Show(FindForm(), message, "Find Sessions", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        if (request.SelectMatches) SelectOnlyIndices(matches);
+    }
+
+    /// <summary>
+    /// Replaces the selection with the given rows and scrolls the first of them into view. Each
+    /// virtual row costs a window message, so a find that matches a whole busy capture selects
+    /// only the first <see cref="MaxSelectedMatches"/> rows rather than stalling the UI thread.
+    /// Every match is still marked.
+    /// </summary>
+    private void SelectOnlyIndices(List<int> indices)
+    {
+        if (indices.Count == 0) return;
+
+        var previousSession = SelectedSession;
+        var previousCount = _list.SelectedIndices.Count;
+        var limit = Math.Min(indices.Count, MaxSelectedMatches);
+
+        _list.BeginUpdate();
+        try
+        {
+            _suppressSelectionChanged = true;
+            _list.SelectedIndices.Clear();
+            for (var i = 0; i < limit; i++) _list.SelectedIndices.Add(indices[i]);
+        }
+        finally
+        {
+            _list.EndUpdate();
+            _suppressSelectionChanged = false;
+        }
+
+        _list.EnsureVisible(indices[0]);
+        _primarySelectedSession = FirstSelectedSession();
+        if (!ReferenceEquals(previousSession, SelectedSession))
+            SelectionChanged?.Invoke(this, SelectedSession);
+        if (previousCount != _list.SelectedIndices.Count)
+            SelectedSessionsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Drops marks for sessions the store no longer holds, so a long capture cannot accumulate
+    /// them without bound. More marks than captured sessions is the only way that happens, which
+    /// keeps this off the common refresh path.
+    /// </summary>
+    private void PruneMarks(List<Session> allSessions)
+    {
+        if (_marks.Count == 0 || _marks.Count <= allSessions.Count) return;
+
+        var live = new HashSet<int>(allSessions.Count);
+        foreach (var session in allSessions) live.Add(session.Id);
+
+        var stale = new List<int>();
+        foreach (var id in _marks.Keys)
+            if (!live.Contains(id)) stale.Add(id);
+        foreach (var id in stale) _marks.Remove(id);
+    }
+
     private void Rebuild()
     {
         var previousSession = SelectedSession;
@@ -277,6 +403,7 @@ public sealed class SessionListView : UserControl
         // rows are about to arrive.
         var wasAtBottom = IsScrolledToBottom();
         _store.CopyTo(_visible);
+        PruneMarks(_visible);
         ApplyVisibilityFiltersInPlace();
 
         _list.BeginUpdate();
@@ -398,9 +525,14 @@ public sealed class SessionListView : UserControl
         var selected = e.Item.Selected;
         var session = e.Item.Tag as Session;
 
+        var mark = Color.Empty;
+        var marked = !selected && session is not null && _marks.TryGetValue(session.Id, out mark);
+
         if (_surfaceBrush.Color != Palette.Surface) _surfaceBrush.Color = Palette.Surface;
         if (_selectionBrush.Color != Palette.Selection) _selectionBrush.Color = Palette.Selection;
-        e.Graphics.FillRectangle(selected ? _selectionBrush : _surfaceBrush, e.Bounds);
+        if (marked && _markBrush.Color != mark) _markBrush.Color = mark;
+        e.Graphics.FillRectangle(
+            selected ? _selectionBrush : marked ? _markBrush : _surfaceBrush, e.Bounds);
 
         var colour = session is null
             ? Palette.Text
@@ -411,6 +543,9 @@ public sealed class SessionListView : UserControl
         // The status column keeps its outcome colour even when the row is selected.
         if (selected && e.ColumnIndex == 1 && session is not null)
             colour = Palette.ForStatus(session);
+
+        // Status colours have too little contrast on a mark colour, so a marked row draws dark.
+        if (marked) colour = Palette.MarkedRowText;
 
         var alignment = e.Header?.TextAlign ?? HorizontalAlignment.Left;
         var flags = TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | alignment switch
@@ -485,9 +620,16 @@ public sealed class SessionListView : UserControl
         // accelerator) would fire first and take it from them.
         if (e.Control && e.KeyCode == Keys.F)
         {
-            FocusFilter();
+            // Ctrl+F finds: it marks matches and keeps every captured row on screen. Ctrl+Shift+F
+            // reaches the filter box, which hides everything that does not match.
+            if (e.Shift) FocusFilter(); else ShowFindSessions();
             e.Handled = true;
             e.SuppressKeyPress = true;
+        }
+        else if (e.KeyCode == Keys.F3)
+        {
+            FindNext();
+            e.Handled = true;
         }
         else if (e.Control && e.KeyCode == Keys.C)
         {
@@ -529,7 +671,10 @@ public sealed class SessionListView : UserControl
         var saveSessionsAsSaz = save.DropDownItems.Add("Selected sessions as &SAZ...", null, (_, _) => SaveSelectedSessionsAsSaz());
         menu.Items.Add(save);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("&Find in sessions\tCtrl+F", null, (_, _) => FocusFilter());
+        menu.Items.Add("&Find sessions...\tCtrl+F", null, (_, _) => ShowFindSessions());
+        menu.Items.Add("Find &next\tF3", null, (_, _) => FindNext());
+        var clearMarks = menu.Items.Add("Clear find &marks", null, (_, _) => ClearMarks());
+        menu.Items.Add("Fi&lter sessions\tCtrl+Shift+F", null, (_, _) => FocusFilter());
         menu.Items.Add("Filter to this &host", null, (_, _) =>
         {
             if (SelectedSession is { } session) FilterText = $"host:{session.Host}";
@@ -551,6 +696,7 @@ public sealed class SessionListView : UserControl
             saveSessionsAsSaz.Enabled = SelectedSessions.Any(session => session.Request is not null);
             save.Enabled = saveResponseBody.Enabled || saveSessionsAsSaz.Enabled;
             resend.Enabled = SelectedSession is { IsTunnel: false, Request: not null };
+            clearMarks.Enabled = _marks.Count > 0;
             autoResponder.Enabled = SelectedSession is { IsTunnel: false, Request.Url: not null };
         };
 
@@ -758,6 +904,7 @@ public sealed class SessionListView : UserControl
             _refreshTimer.Dispose();
             _surfaceBrush.Dispose();
             _selectionBrush.Dispose();
+            _markBrush.Dispose();
             _headerBrush.Dispose();
             _headerBorderPen.Dispose();
         }

@@ -136,6 +136,64 @@ internal static class SearchQueryTests
             runner.AreEqual(1, SearchQuery.Parse("url:/[unclosed/").Warnings.Count, "a bad regex warns");
             return Task.CompletedTask;
         });
+
+        await runner.RunAsync("a find scope restricts bare terms but not fielded ones", () =>
+        {
+            var requestOnly = Build(
+                url: "http://api.example.test/v1/orders",
+                requestBody: "{\"marker\":1}",
+                responseBody: "nothing here");
+            var responseOnly = Build(
+                url: "http://cdn.example.test/logo.svg",
+                requestBody: "{}",
+                responseBody: "marker in the response",
+                responseStatus: 404);
+
+            runner.IsTrue(SearchQuery.Parse("marker", "req").Matches(requestOnly),
+                "a request-body scope matches a term in the request body");
+            runner.IsTrue(!SearchQuery.Parse("marker", "req").Matches(responseOnly),
+                "and not one that only appears in the response body");
+            runner.IsTrue(SearchQuery.Parse("marker", "resp").Matches(responseOnly),
+                "a response-body scope matches the other way round");
+            runner.IsTrue(!SearchQuery.Parse("orders", "resp").Matches(requestOnly),
+                "a scoped term no longer reaches the URL");
+            runner.IsTrue(SearchQuery.Parse("orders", "url").Matches(requestOnly),
+                "a URL scope still matches the URL");
+
+            runner.IsTrue(SearchQuery.Parse("status:404 marker", "resp").Matches(responseOnly),
+                "a term that names its own field keeps it under a scope");
+            runner.IsTrue(!SearchQuery.Parse("status:200 marker", "resp").Matches(responseOnly),
+                "and is still ANDed with the scoped term");
+            runner.IsTrue(!SearchQuery.Parse("-marker", "resp").Matches(responseOnly),
+                "negation survives the scope");
+
+            runner.AreEqual("req", SearchQuery.Parse("marker", "req").Fields[0],
+                "the scope is reported as the field the query used");
+            runner.IsTrue(SearchQuery.Parse("", "req").IsEmpty, "an empty scoped query matches nothing");
+            return Task.CompletedTask;
+        });
+
+        await runner.RunAsync("next-match navigation walks the highlighted rows and wraps", () =>
+        {
+            var rows = new List<Session>
+            {
+                Build(url: "http://api.example.test/v1/orders"),
+                Build(url: "http://cdn.example.test/logo.svg"),
+                Build(url: "http://api.example.test/v1/orders/42"),
+            };
+            var query = SearchQuery.Parse("orders");
+
+            runner.AreEqual(0, query.NextMatchIndex(rows, -1), "nothing selected starts at the top");
+            runner.AreEqual(2, query.NextMatchIndex(rows, 0), "the next match skips the non-matching row");
+            runner.AreEqual(0, query.NextMatchIndex(rows, 2), "the last match wraps to the first");
+            runner.AreEqual(0, query.NextMatchIndex(rows, 99), "an out-of-range start searches from the top");
+
+            runner.AreEqual(-1, SearchQuery.Parse("invoices").NextMatchIndex(rows, -1),
+                "a query with no match reports no row");
+            runner.AreEqual(-1, query.NextMatchIndex([], -1), "an empty list reports no row");
+            runner.AreEqual(-1, SearchQuery.Empty.NextMatchIndex(rows, -1), "an empty query reports no row");
+            return Task.CompletedTask;
+        });
     }
 
     private static bool Hits(string query, Session session) => SearchQuery.Parse(query).Matches(session);
