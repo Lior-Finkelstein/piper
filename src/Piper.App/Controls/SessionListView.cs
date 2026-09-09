@@ -328,13 +328,14 @@ public sealed class SessionListView : UserControl
             else _marks.Remove(_visible[index].Id);
         }
 
-        _list.Invalidate();
-
         if (matches.Count == 0)
         {
+            // No mark changed, so nothing needs repainting.
             ReportFind("No sessions matched.");
             return;
         }
+
+        _list.Invalidate();
 
         if (request.SelectMatches) SelectOnlyIndices(matches);
 
@@ -386,8 +387,10 @@ public sealed class SessionListView : UserControl
         }
         finally
         {
-            _list.EndUpdate();
+            // Clear the flag before EndUpdate: the redraw call is a P/Invoke that can throw, and a
+            // flag left set would silently swallow every later selection event for this grid.
             _suppressSelectionChanged = false;
+            _list.EndUpdate();
         }
 
         _list.EnsureVisible(indices[0]);
@@ -664,6 +667,7 @@ public sealed class SessionListView : UserControl
             // rather than make it a compatibility break to add that direction later.
             FindNext();
             e.Handled = true;
+            e.SuppressKeyPress = true;
         }
         else if (e.Control && e.KeyCode == Keys.C)
         {
