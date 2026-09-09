@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Windows.Forms;
 using Piper.App.Theme;
 using Piper.Core.Sessions;
@@ -31,6 +31,7 @@ public sealed class SessionListView : UserControl
     private readonly List<Session> _visible = new(1024);
     private SearchQuery _query = SearchQuery.Empty;
     private Func<Session, bool>? _visibilityFilter;
+    private Func<Session, bool>? _filtersetFilter;
     private bool _autoScroll = true;
 
     public event EventHandler<Session?>? SelectionChanged;
@@ -202,6 +203,24 @@ public sealed class SessionListView : UserControl
         }
     }
 
+    /// <summary>
+    /// The Filters tab's applied filterset, as a visibility filter in its own slot. It must not
+    /// share <see cref="VisibilityFilter"/> (the capture scope owns that) and must not be written
+    /// into <see cref="FilterText"/>: the search box is the user's to type in, and mirroring the
+    /// filterset there both destroyed what they had typed and let editing the box appear to switch
+    /// the filterset off while it was still discarding traffic at admission.
+    /// </summary>
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public Func<Session, bool>? FiltersetFilter
+    {
+        get => _filtersetFilter;
+        set
+        {
+            _filtersetFilter = value;
+            Rebuild();
+        }
+    }
+
     private void RequestRefresh() => _refreshPending = true;
 
     /// <summary>
@@ -310,7 +329,7 @@ public sealed class SessionListView : UserControl
 
     private void ApplyVisibilityFiltersInPlace()
     {
-        if (_query.IsEmpty && _visibilityFilter is null) return;
+        if (_query.IsEmpty && _visibilityFilter is null && _filtersetFilter is null) return;
 
         var writeIndex = 0;
         for (var readIndex = 0; readIndex < _visible.Count; readIndex++)
@@ -320,6 +339,7 @@ public sealed class SessionListView : UserControl
             // visible even when an ad-hoc or capture-scope filter would otherwise omit it.
             if (!session.IsUpdateCheck && !_query.IsEmpty && !_query.Matches(session)) continue;
             if (!session.IsUpdateCheck && _visibilityFilter is not null && !_visibilityFilter(session)) continue;
+            if (!session.IsUpdateCheck && _filtersetFilter is not null && !_filtersetFilter(session)) continue;
             _visible[writeIndex++] = session;
         }
 

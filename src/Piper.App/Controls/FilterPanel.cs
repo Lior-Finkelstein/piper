@@ -306,8 +306,10 @@ public sealed class FilterPanel : UserControl
         + "Filtered-out sessions are dropped rather than hidden, so traffic captured while a "
         + "filter is applied cannot be recovered by turning the filter off afterwards. Check "
         + "your host and status choices before enabling the filterset.\r\n\r\n"
-        + "Filters compose into the same query grammar as the session grid's own filter box, "
-        + "so running a filterset overwrites anything typed there by hand.\r\n\r\n"
+        + "Filters compose into the same query grammar as the session grid's own filter box, but "
+        + "apply separately: running a filterset leaves whatever you typed there alone, and both "
+        + "narrow the list together. Editing that box does not turn the filterset off -- use the "
+        + "Use Filters checkbox for that.\r\n\r\n"
         + "Only Hosts and Response Status Code filters are implemented.",
         "Filters", MessageBoxButtons.OK, MessageBoxIcon.Information);
 

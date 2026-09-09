@@ -157,14 +157,16 @@ public sealed class MainForm : Form
         _sessionList.ResendRequested += (_, session) => _ = _composer.ResendAsync(session);
         _sessionList.SessionActivated += (_, _) => _rightTabs.SelectedIndex = 0;
 
-        // Known simplification: applying a Filterset writes straight into the same FilterText
-        // the grid's own ad-hoc filter box uses, so it overwrites anything typed there by hand,
-        // and the two are never combined. FilterPanel stages criteria edits until Actions or the
-        // Use Filters switch applies them. Saving here is what persists that switch, so keep it.
+        // The filterset gets its own visibility slot rather than the grid's ad-hoc filter box.
+        // Writing it into FilterText destroyed whatever the user had typed there, and worse, let
+        // them edit or clear the box and believe the filterset was off while CompletedSessionFilter
+        // kept discarding traffic at admission. Both now come from the same query and the search
+        // box stays theirs. FilterPanel stages criteria edits until Actions or the Use Filters
+        // switch applies them.
         _filterPanel.FilterChanged += (_, query) =>
         {
-            _sessionList.FilterText = query;
             var admissionQuery = SearchQuery.Parse(query);
+            _sessionList.FiltersetFilter = admissionQuery.IsEmpty ? null : admissionQuery.Matches;
             _store.CompletedSessionFilter = admissionQuery.IsEmpty ? null : admissionQuery.Matches;
             // Keep this save unconditional. The Use Filters checkbox no longer raises
             // SettingsChanged, so this is the only path that persists it: making the save depend
@@ -1285,9 +1287,9 @@ public sealed class MainForm : Form
         }
 
         // Hide it here and now, but leave the filterset staged rather than running it: recomposing
-        // would overwrite anything typed in the grid's own filter box, and would start dropping
-        // this host at admission (SessionStore.CompletedSessionFilter), which unticking the entry
-        // later cannot undo. As in Fiddler Classic, running a filterset stays an explicit action.
+        // would start dropping this host at admission (SessionStore.CompletedSessionFilter), which
+        // unticking the entry later cannot undo. As in Fiddler Classic, running a filterset stays
+        // an explicit action.
         AppendTransientHideTerm(host);
 
         var settings = _filterPanel.Settings;
