@@ -310,6 +310,15 @@ public sealed class SessionListView : UserControl
 
     private void ApplyFind(FindSessionsRequest request)
     {
+        // An empty query matches every session, so it would mark - or with No highlight, unmark -
+        // the entire capture. The dialog's disabled button only rejects blank input; a query that
+        // parses away to nothing, such as status:abc, still arrives here.
+        if (_findQuery.IsEmpty)
+        {
+            ReportFind("That query has nothing to match.");
+            return;
+        }
+
         var matches = new List<int>();
         for (var index = 0; index < _visible.Count; index++)
         {
@@ -323,29 +332,36 @@ public sealed class SessionListView : UserControl
 
         if (matches.Count == 0)
         {
-            var message = _findQuery.Warnings.Count > 0
-                ? "No sessions matched." + Environment.NewLine + Environment.NewLine
-                    + string.Join(Environment.NewLine, _findQuery.Warnings)
-                : "No sessions matched.";
-            MessageBox.Show(FindForm(), message, "Find Sessions", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            ReportFind("No sessions matched.");
             return;
         }
 
-        if (!request.SelectMatches) return;
+        if (request.SelectMatches) SelectOnlyIndices(matches);
 
-        SelectOnlyIndices(matches);
+        var outcome = request.Highlight is null
+            ? $"{matches.Count:N0} sessions matched and had their marks removed."
+            : $"{matches.Count:N0} sessions matched and are marked.";
 
         // Context-menu actions work on the selection, so a capped selection must not look like the
         // whole result: say so rather than let an export or a delete quietly cover part of it.
-        if (matches.Count > MaxSelectedMatches)
-        {
-            var outcome = request.Highlight is null
-                ? $"{matches.Count:N0} sessions matched and had their marks removed."
-                : $"{matches.Count:N0} sessions matched and are marked.";
-            MessageBox.Show(FindForm(),
-                outcome + $"{Environment.NewLine}Only the first {MaxSelectedMatches:N0} are selected.",
-                "Find Sessions", MessageBoxButtons.OK, MessageBoxIcon.Information);
-        }
+        if (request.SelectMatches && matches.Count > MaxSelectedMatches)
+            ReportFind(outcome + $"{Environment.NewLine}Only the first {MaxSelectedMatches:N0} are selected.");
+        else if (_findQuery.Warnings.Count > 0)
+            ReportFind(outcome);
+    }
+
+    /// <summary>
+    /// Reports the outcome of a find, always appending the parse warnings. A query Piper could not
+    /// read the way it was typed must not come back looking like a clean result, however many
+    /// sessions the terms it did understand happened to match.
+    /// </summary>
+    private void ReportFind(string message)
+    {
+        if (_findQuery.Warnings.Count > 0)
+            message += Environment.NewLine + Environment.NewLine
+                + string.Join(Environment.NewLine, _findQuery.Warnings);
+
+        MessageBox.Show(FindForm(), message, "Find Sessions", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     /// <summary>
@@ -359,7 +375,6 @@ public sealed class SessionListView : UserControl
         if (indices.Count == 0) return;
 
         var previousSession = SelectedSession;
-        var previousCount = _list.SelectedIndices.Count;
         var limit = Math.Min(indices.Count, MaxSelectedMatches);
 
         _list.BeginUpdate();
@@ -379,8 +394,10 @@ public sealed class SessionListView : UserControl
         _primarySelectedSession = FirstSelectedSession();
         if (!ReferenceEquals(previousSession, SelectedSession))
             SelectionChanged?.Invoke(this, SelectedSession);
-        if (previousCount != _list.SelectedIndices.Count)
-            SelectedSessionsChanged?.Invoke(this, EventArgs.Empty);
+
+        // The selection was replaced wholesale and the grid's own event was suppressed above, so
+        // notify unconditionally: a same-sized selection of different rows is still a change.
+        SelectedSessionsChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>
@@ -641,8 +658,10 @@ public sealed class SessionListView : UserControl
             e.Handled = true;
             e.SuppressKeyPress = true;
         }
-        else if (e.KeyCode == Keys.F3)
+        else if (e.KeyCode == Keys.F3 && e.Modifiers == Keys.None)
         {
+            // Bare F3 only. Shift+F3 conventionally means find-previous, so leave it unbound
+            // rather than make it a compatibility break to add that direction later.
             FindNext();
             e.Handled = true;
         }

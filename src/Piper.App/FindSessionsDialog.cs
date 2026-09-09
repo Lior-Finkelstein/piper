@@ -1,5 +1,6 @@
 using System.Windows.Forms;
 using Piper.App.Theme;
+using Piper.Core.Sessions;
 
 namespace Piper.App;
 
@@ -38,18 +39,6 @@ public sealed class FindSessionsDialog : Form
         ("Purple", Color.FromArgb(205, 175, 240)),
         ("Gray", Color.FromArgb(198, 198, 204)),
         ("No highlight - remove marks", null),
-    ];
-
-    private static readonly (string Name, string? Field)[] Scopes =
-    [
-        ("Everything (URL, headers and bodies)", null),
-        ("Headers only", "header"),
-        ("Request headers only", "reqheader"),
-        ("Response headers only", "respheader"),
-        ("Bodies only", "body"),
-        ("Request bodies only", "req"),
-        ("Response bodies only", "resp"),
-        ("URLs only", "url"),
     ];
 
     private readonly TextBox _query;
@@ -91,8 +80,8 @@ public sealed class FindSessionsDialog : Form
             Width = 320,
             Anchor = AnchorStyles.Left,
         };
-        foreach (var (name, _) in Scopes) _scope.Items.Add(name);
-        _scope.SelectedIndex = Math.Max(0, Array.FindIndex(Scopes, scope => scope.Field == previous.Scope));
+        foreach (var (label, _) in SearchQuery.Scopes) _scope.Items.Add(label);
+        _scope.SelectedIndex = IndexOfScope(previous.Scope);
 
         _highlight = new ComboBox
         {
@@ -189,9 +178,16 @@ public sealed class FindSessionsDialog : Form
 
     private FindSessionsRequest Request => new(
         _query.Text,
-        Scopes[_scope.SelectedIndex].Field,
+        SearchQuery.Scopes[_scope.SelectedIndex].Field,
         MarkColours[_highlight.SelectedIndex].Colour,
         _selectMatches.Checked);
+
+    private static int IndexOfScope(string? field)
+    {
+        for (var index = 0; index < SearchQuery.Scopes.Count; index++)
+            if (SearchQuery.Scopes[index].Field == field) return index;
+        return 0;
+    }
 
     private static Label RowLabel(string text) => new()
     {

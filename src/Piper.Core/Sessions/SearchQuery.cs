@@ -56,6 +56,24 @@ public sealed class SearchQuery
     /// <summary>The <c>is:</c> values the query used, lowercased, for the same reason.</summary>
     public IReadOnlyList<string> IsValuesUsed { get; private init; } = [];
 
+    /// <summary>
+    /// The scopes a find can offer: a label, and the field <see cref="Parse(string?, string?)"/>
+    /// restricts bare terms to (null searches everything). Kept beside the grammar rather than in
+    /// the dialog so the smoke tests parse the same table the UI offers -- a scope naming a field
+    /// the grammar does not know would otherwise degrade quietly into a literal search for it.
+    /// </summary>
+    public static readonly IReadOnlyList<(string Label, string? Field)> Scopes =
+    [
+        ("Everything (URL, headers and bodies)", null),
+        ("Headers only", "header"),
+        ("Request headers only", "reqheader"),
+        ("Response headers only", "respheader"),
+        ("Bodies only", "body"),
+        ("Request bodies only", "req"),
+        ("Response bodies only", "resp"),
+        ("URLs only", "url"),
+    ];
+
     public bool Matches(Session session)
     {
         for (var i = 0; i < _predicates.Count; i++)

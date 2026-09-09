@@ -137,6 +137,43 @@ internal static class SearchQueryTests
             return Task.CompletedTask;
         });
 
+        await runner.RunAsync("every offered find scope names a field the grammar knows", () =>
+        {
+            var session = Build(
+                url: "http://api.example.test/v1/orders?tag=urlmarker",
+                requestHeaders: [("X-Trace", "reqheadermarker")],
+                requestBody: "reqbodymarker",
+                responseHeaders: [("X-Backend", "respheadermarker")],
+                responseBody: "respbodymarker");
+
+            foreach (var (label, field) in SearchQuery.Scopes)
+            {
+                var scoped = SearchQuery.Parse("orders", field);
+                runner.AreEqual(0, scoped.Warnings.Count, $"scope '{label}' parses without warnings");
+                runner.IsTrue(!scoped.IsEmpty, $"scope '{label}' compiles a predicate");
+            }
+
+            runner.IsTrue(SearchQuery.Parse("urlmarker", "url").Matches(session),
+                "the URL scope reaches the query string");
+            runner.IsTrue(!SearchQuery.Parse("reqbodymarker", "url").Matches(session),
+                "and not the request body");
+            runner.IsTrue(SearchQuery.Parse("reqheadermarker", "reqheader").Matches(session),
+                "the request-header scope reaches a request header");
+            runner.IsTrue(!SearchQuery.Parse("respheadermarker", "reqheader").Matches(session),
+                "and not a response header");
+            runner.IsTrue(SearchQuery.Parse("respheadermarker", "respheader").Matches(session),
+                "the response-header scope reaches a response header");
+            runner.IsTrue(SearchQuery.Parse("reqheadermarker", "header").Matches(session)
+                && SearchQuery.Parse("respheadermarker", "header").Matches(session),
+                "the headers scope reaches both sides");
+            runner.IsTrue(SearchQuery.Parse("reqbodymarker", "body").Matches(session)
+                && SearchQuery.Parse("respbodymarker", "body").Matches(session),
+                "the bodies scope reaches both sides");
+            runner.IsTrue(!SearchQuery.Parse("respheadermarker", "body").Matches(session),
+                "and not a header");
+            return Task.CompletedTask;
+        });
+
         await runner.RunAsync("a find scope restricts bare terms but not fielded ones", () =>
         {
             var requestOnly = Build(
