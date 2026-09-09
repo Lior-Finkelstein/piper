@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Windows.Forms;
 using Piper.App.Theme;
 using Piper.Core.Sessions;
