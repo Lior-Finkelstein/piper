@@ -1461,17 +1461,16 @@ public sealed class MainForm : Form, IMessageFilter
         var wasShowOnly = settings.HostsMode != 1;
         if (!settings.HideHost(host))
         {
-            AppendLog($"Hide this host: the Filters tab is showing only specific hosts, so {host} "
-                + "was hidden in the capture list only and will not be remembered.");
+            AppendLog($"Hide this host: {host} is hidden in the capture list for this session only. "
+                + "The Filters tab is showing only specific hosts, which cannot also carry an "
+                + "exception, so switch its Hosts list to \"Hide the following Hosts\" to keep it.");
             return;
         }
 
         _filterPanel.ApplySettings(settings);
-        // Reached both when the list had nothing ticked to begin with and when unticking the only
-        // entry that showed this host left nothing ticked, so the message states the effect only.
         if (wasShowOnly && settings.HostsMode == 1)
-            AppendLog("Hide this host: the Filters tab's Hosts list switched to "
-                + "\"Hide the following Hosts\".");
+            AppendLog("Hide this host: the Filters tab's Hosts list had nothing ticked, so it "
+                + "switched to \"Hide the following Hosts\".");
 
         AppendLog($"Hide this host: the Filters tab's Hosts list now hides {host}. It stays hidden "
             + "here for this session; the saved list applies when you tick \"Use Filters\" there, "

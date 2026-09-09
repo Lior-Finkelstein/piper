@@ -54,8 +54,11 @@ internal static class HostFilterHideTests
 
         await runner.RunAsync("hiding a host never inverts a show-only list", () =>
         {
-            // Show-only means the shown set *is* the ticked entries. Hiding a host the user asked
-            // to see unticks that entry; switching the mode would hide everything else instead.
+            // Show-only means the shown set *is* the ticked entries, and one global HostsMode
+            // cannot also carry an exception, so a hide is not recordable and nothing is touched.
+            // Unticking the pattern that was showing the host would look like it worked while
+            // hiding everything else that pattern matched, and would leave the list with nothing
+            // naming the host -- hidden after a restart with no sign of why.
             var showOnly = new FilterSettings
             {
                 HostsMode = 0,
@@ -65,13 +68,13 @@ internal static class HostFilterHideTests
                     new HostFilterEntry { Pattern = "keep.example.net", Enabled = true },
                 ],
             };
-            runner.IsTrue(showOnly.HideHost("api.example.com"), "hiding a shown host succeeds");
+            runner.IsTrue(!showOnly.HideHost("api.example.com"), "a show-only list cannot record a hide");
             runner.AreEqual(0, showOnly.HostsMode, "show-only mode is left alone");
-            runner.IsTrue(!showOnly.Hosts[0].Enabled, "the entry that showed the host is unticked");
-            runner.IsTrue(showOnly.Hosts[1].Enabled, "the other shown host is untouched");
+            runner.IsTrue(showOnly.Hosts[0].Enabled, "the pattern that showed the host stays ticked");
+            runner.IsTrue(showOnly.Hosts[1].Enabled, "and so does every other shown host");
+            runner.AreEqual(2, showOnly.Hosts.Count, "no entry is added");
 
-            // A host that no ticked entry shows cannot be expressed as "hide just this one" without
-            // inverting the list, so nothing is changed and the caller is told.
+            // Same refusal when no ticked entry shows the host at all.
             var elsewhere = new FilterSettings
             {
                 HostsMode = 0,
@@ -82,34 +85,20 @@ internal static class HostFilterHideTests
             runner.AreEqual(1, elsewhere.Hosts.Count, "no entry is added");
             runner.IsTrue(elsewhere.Hosts[0].Enabled, "the existing entry is not unticked");
 
-            // The trap in the other direction: unticking the only ticked entry would leave a
-            // show-only list that shows *everything*, the host just hidden included. Hide mode is
-            // the one reading of the click that still hides it.
+            // A single ticked entry that is exactly the host is refused too: the list still says
+            // "show only", and silently turning that into "hide" is the inversion to avoid.
             var soleEntry = new FilterSettings
             {
                 HostsMode = 0,
+                HostsText = "api.example.com",
                 Hosts = [new HostFilterEntry { Pattern = "api.example.com", Enabled = true }],
             };
-            runner.IsTrue(soleEntry.HideHost("api.example.com"), "hiding the only shown host succeeds");
-            runner.AreEqual(1, soleEntry.HostsMode, "the list cannot stay show-only and still hide it");
-            runner.AreEqual(1, soleEntry.Hosts.Count, "the entry is reused, not duplicated");
-            runner.IsTrue(soleEntry.Hosts[0].Enabled, "and is ticked so the hide actually applies");
-            runner.AreEqual("-host:api.example.com",
+            runner.IsTrue(!soleEntry.HideHost("api.example.com"), "the only shown host is refused as well");
+            runner.AreEqual(0, soleEntry.HostsMode, "its mode is left alone");
+            runner.IsTrue(soleEntry.Hosts[0].Enabled, "and its entry stays ticked");
+            runner.AreEqual("host:api.example.com",
                 HostFilterTerm.Compose(soleEntry.HostsText, hide: soleEntry.HostsMode == 1),
-                "the result composes to a hide term, not an empty one");
-
-            // Same trap with a wildcard: the parked pattern is not the host, so the host is listed
-            // in its own right rather than the wildcard being re-ticked as a hide-everything rule.
-            var soleWildcard = new FilterSettings
-            {
-                HostsMode = 0,
-                Hosts = [new HostFilterEntry { Pattern = "*.example.com", Enabled = true }],
-            };
-            runner.IsTrue(soleWildcard.HideHost("api.example.com"), "hiding the only shown wildcard succeeds");
-            runner.AreEqual(1, soleWildcard.HostsMode, "hide mode is adopted");
-            runner.AreEqual(2, soleWildcard.Hosts.Count, "the host joins the list");
-            runner.IsTrue(!soleWildcard.Hosts[0].Enabled, "the wildcard stays unticked, hiding nothing extra");
-            runner.IsTrue(soleWildcard.Hosts[1].Enabled, "only the requested host is hidden");
+                "so the list still composes exactly what the user set up");
 
             // Show-only with nothing ticked composes to an empty term and so filters nothing.
             // Adopting hide mode there inverts no live intent; the parked patterns stay parked.

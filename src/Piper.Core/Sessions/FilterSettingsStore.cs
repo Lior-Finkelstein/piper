@@ -26,8 +26,9 @@ public sealed class FilterSettings
     /// <summary>
     /// Records "hide this host" in <see cref="Hosts"/> so the session grid's right-click menu item
     /// survives a restart instead of only touching the grid's transient filter box. Returns false
-    /// when the current filterset cannot express the hide without inverting a list the user set up,
-    /// in which case nothing is changed at all and the caller should fall back to a transient filter.
+    /// when the list cannot express the hide -- it is showing only specific hosts, which a single
+    /// global <see cref="HostsMode"/> cannot combine with an exclusion -- and then nothing is
+    /// changed at all, so the caller must fall back to a transient filter and say it is not kept.
     /// Deliberately never writes <see cref="UseFilters"/>: as in Fiddler Classic, running a filterset
     /// stays an explicit user action.
     /// </summary>
@@ -44,23 +45,13 @@ public sealed class FilterSettings
         var entries = (Hosts ?? []).Where(entry => !string.IsNullOrWhiteSpace(entry?.Pattern)).ToList();
 
         // Anything but 1 is show-only, matching how the Filters tab coerces a restored mode.
-        if (HostsMode != 1 && entries.Any(entry => entry.Enabled))
-        {
-            // Show-only means the shown set *is* the ticked entries, so hiding a host means
-            // unticking whichever ones let it through. Switching HostsMode instead would invert the
-            // whole list and hide everything the user asked to see.
-            var shows = entries.Where(entry => entry.Enabled && Covers(entry.Pattern, pattern)).ToList();
-
-            // Nothing ticked shows this host, so there is no way to say "hide just this one"
-            // without inverting the list.
-            if (shows.Count == 0) return false;
-
-            foreach (var entry in shows) entry.Enabled = false;
-
-            // Unticking the last ticked entry leaves a show-only list that shows everything, this
-            // host included, so only stop here while something is still ticked.
-            if (entries.Any(entry => entry.Enabled)) return Commit(entries);
-        }
+        // Show-only means the shown set *is* the ticked entries, and a single global HostsMode
+        // cannot say "show these but not that", so a hide is not recordable here at all. Unticking
+        // whatever was showing the host looks like it works, but a pattern broad enough to show
+        // this host was showing others, which vanish with it -- and it leaves the Hosts list with
+        // nothing naming the host, so after a restart it is hidden with no sign of why. Report the
+        // refusal and let the caller hide it for this session only.
+        if (HostsMode != 1 && entries.Any(entry => entry.Enabled)) return false;
 
         // Either already hiding, or a show-only list with nothing ticked -- which composes to an
         // empty term and so filters nothing, meaning hide mode inverts no live intent.
