@@ -191,7 +191,8 @@ targets, so `Invoke-WebRequest -Proxy` would never reach Piper.
 - Copy as curl, per-host filtering, dark theme
 - Importing and exporting Fiddler SAZ session archives, by drag-and-drop or **File > Open SAZ
   capture...**; a request-only `.raz` capture is appended to the Composer's history (no responses
-  to inspect, but readily reloaded and resent) rather than the main request list
+  to inspect, but readily reloaded and resent) rather than the main request list. That history
+  keeps the 2,000 most recent requests and drops the oldest beyond that
 - AutoResponder: ordered rules that answer a request locally instead of sending it upstream -
   see below
 - TextWizard: encode, decode and hash a value without leaving Piper — see below

@@ -243,6 +243,11 @@ public sealed class MainForm : Form, IMessageFilter
         AppendLog(TrustStore.IsTrusted(_ca.RootCertificate)
             ? "Root CA is trusted by the current user. HTTPS decryption will work."
             : "Root CA is NOT trusted. HTTPS sites will fail until you use Tools > Configurations > HTTPS.");
+        // The toggle persists across restarts, so say so on every start rather than leaving a
+        // disabled origin-certificate check to be remembered.
+        if (!_options.ValidateUpstreamCertificates)
+            AppendLog("Origin server certificate verification is OFF (Configurations > HTTPS). Piper cannot "
+                + "tell a real origin from something impersonating it.");
 
         // Capture starts in OnShown, not here: anything that blocks in the constructor -
         // a dialog in particular - runs before Application.Run shows the window, and the
@@ -633,6 +638,9 @@ public sealed class MainForm : Form, IMessageFilter
         FontScale.WheelEnabled = dialog.WheelZoom;
         SaveFontScaleSettings();
         AppendLog("Configurations saved. HTTPS protocol changes apply to new connections.");
+        if (!_options.ValidateUpstreamCertificates)
+            AppendLog("Origin server certificate verification is OFF. Piper cannot tell a real origin from "
+                + "something impersonating it. Turn it back on when you are done testing.");
     }
 
     private void ShowHosts()

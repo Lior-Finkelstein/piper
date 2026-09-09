@@ -400,13 +400,27 @@ public sealed class ComposerPanel : UserControl
     }
 
     /// <summary>Appends sessions (e.g. a Fiddler "request-only" archive import) to the persisted
-    /// Composer history, alongside whatever is already there.</summary>
+    /// Composer history, alongside whatever is already there. Each one is reduced to exactly what
+    /// a reload from disk would produce - a composed, request-only entry - so an imported row does
+    /// not read as a failed Composer send before the next restart and then change afterwards.</summary>
     public void AppendToHistory(IEnumerable<Session> sessions)
     {
-        var added = sessions.Where(session => session.Request is not null).ToArray();
+        var added = sessions
+            .Where(session => session.Request is not null)
+            .Select(session => new Session
+            {
+                Request = session.Request,
+                IsComposed = true,
+                Completed = session.Completed ?? session.Started,
+            })
+            .ToArray();
         if (added.Length == 0) return;
 
         _history.AddRange(added);
+        // Keep memory and the file in step: Save persists only the newest MaxEntries, so a large
+        // archive must not leave thousands of extra rows visible until the next restart.
+        if (_history.Count > ComposerHistoryStore.MaxEntries)
+            _history.RemoveRange(0, _history.Count - ComposerHistoryStore.MaxEntries);
         ComposerHistoryStore.Save(_history);
         _searchDirty = true;
     }
