@@ -452,6 +452,13 @@ public sealed class MainForm : Form, IMessageFilter
         tools.DropDownItems.Add(hosts);
         tools.DropDownItems.Add(new ToolStripSeparator());
         // Fiddler puts TextWizard on Ctrl+E; that is already send-to-Composer here, so Ctrl+T it is.
+        // Ctrl+F is deliberately not a menu shortcut: a menu accelerator fires before the focused
+        // control sees the key, and the Composer and inspector searches own Ctrl+F for themselves.
+        tools.DropDownItems.Add(new ToolStripMenuItem("&Find sessions...", null,
+            (_, _) => _sessionList.ShowFindSessions())
+        {
+            ShortcutKeyDisplayString = "Ctrl+F",
+        });
         tools.DropDownItems.Add(new ToolStripMenuItem("&TextWizard...", null, (_, _) => TextWizardDialog.Open(this))
         {
             ShortcutKeys = Keys.Control | Keys.T,
@@ -1237,8 +1244,12 @@ public sealed class MainForm : Form, IMessageFilter
     private void ShowSearchHelp()
     {
         const string help = """
-            The same query grammar works in the session filter and the Composer search.
-            Terms are combined with AND. Ctrl+F focuses the session filter box.
+            The same query grammar works in Find Sessions, the session filter box and the
+            Composer search. Terms are combined with AND.
+
+            Ctrl+F opens Find Sessions: it marks matching sessions in a colour you pick and
+            hides nothing. F3 selects the next match. Ctrl+Shift+F focuses the filter box,
+            which does hide the sessions that do not match.
 
               checkout               substring across URL, headers and text bodies
               "exact phrase"         quoted literal

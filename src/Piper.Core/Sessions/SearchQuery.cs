@@ -56,6 +56,24 @@ public sealed class SearchQuery
     /// <summary>The <c>is:</c> values the query used, lowercased, for the same reason.</summary>
     public IReadOnlyList<string> IsValuesUsed { get; private init; } = [];
 
+    /// <summary>
+    /// The scopes a find can offer: a label, and the field <see cref="Parse(string?, string?)"/>
+    /// restricts bare terms to (null searches everything). Kept beside the grammar rather than in
+    /// the dialog so the smoke tests parse the same table the UI offers -- a scope naming a field
+    /// the grammar does not know would otherwise degrade quietly into a literal search for it.
+    /// </summary>
+    public static readonly IReadOnlyList<(string Label, string? Field)> Scopes =
+    [
+        ("Everything (URL, headers and bodies)", null),
+        ("Headers only", "header"),
+        ("Request headers only", "reqheader"),
+        ("Response headers only", "respheader"),
+        ("Bodies only", "body"),
+        ("Request bodies only", "req"),
+        ("Response bodies only", "resp"),
+        ("URLs only", "url"),
+    ];
+
     public bool Matches(Session session)
     {
         for (var i = 0; i < _predicates.Count; i++)
@@ -67,7 +85,33 @@ public sealed class SearchQuery
     public IEnumerable<Session> Filter(IEnumerable<Session> sessions) =>
         IsEmpty ? sessions : sessions.Where(Matches);
 
-    public static SearchQuery Parse(string? query)
+    /// <summary>
+    /// Index of the first match after <paramref name="startAfter"/>, wrapping around to the start
+    /// of the list; -1 when nothing matches. Drives "jump to the next highlighted row", so an
+    /// out-of-range <paramref name="startAfter"/> (nothing selected yet) simply searches from the top.
+    /// </summary>
+    public int NextMatchIndex(IReadOnlyList<Session> sessions, int startAfter)
+    {
+        if (IsEmpty || sessions.Count == 0) return -1;
+
+        var first = startAfter < 0 || startAfter >= sessions.Count ? 0 : startAfter + 1;
+        for (var offset = 0; offset < sessions.Count; offset++)
+        {
+            var index = (first + offset) % sessions.Count;
+            if (Matches(sessions[index])) return index;
+        }
+
+        return -1;
+    }
+
+    public static SearchQuery Parse(string? query) => Parse(query, null);
+
+    /// <summary>
+    /// Parses <paramref name="query"/> with bare terms restricted to <paramref name="defaultField"/>
+    /// -- the Find Sessions dialog's search scope. A term that names its own field keeps it, so a
+    /// scoped find can still mix in <c>status:</c> or <c>host:</c>.
+    /// </summary>
+    public static SearchQuery Parse(string? query, string? defaultField)
     {
         if (string.IsNullOrWhiteSpace(query)) return Empty;
 
@@ -77,8 +121,12 @@ public sealed class SearchQuery
         var fields = new List<string>();
         var isValues = new List<string>();
 
-        foreach (var token in Tokenize(query))
+        foreach (var parsed in Tokenize(query))
         {
+            var token = parsed.Field is null && defaultField is not null
+                ? parsed with { Field = defaultField }
+                : parsed;
+
             if (token.Field is { } field)
             {
                 if (!fields.Contains(field)) fields.Add(field);

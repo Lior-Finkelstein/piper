@@ -75,6 +75,15 @@ Nothing installs the root implicitly - it is only ever a deliberate menu action.
 
 ## Search grammar
 
+**Find Sessions** (`Ctrl+F`, or **Tools > Find sessions**) searches without hiding anything: it
+marks every match in a colour you pick - yellow, orange, red, green, blue, purple or gray - and
+optionally selects them. `F3` steps to the next match, and **Clear find marks** on the session
+right-click menu removes the marks. Choosing *No highlight* unmarks the sessions a find matches.
+A find can be scoped to headers, bodies, one side of the exchange, or URLs only.
+
+The **filter** box above the session list (`Ctrl+Shift+F`) uses the same grammar but hides every
+session that does not match.
+
 Terms are ANDed. Prefix any term with `-` or `!` to negate it.
 
 | Form | Example | Matches |
@@ -109,7 +118,9 @@ method:POST host:api status:>=400 -is:image body:"order"
 | Key | Action |
 | --- | --- |
 | `F12` | start / stop capturing |
-| `Ctrl+F` | focus the session filter box (with the session list focused) |
+| `Ctrl+F` | open Find Sessions, marking matches (with the session list focused) |
+| `F3` | select the next session matching the last find |
+| `Ctrl+Shift+F` | focus the session filter box, hiding non-matches |
 | `Ctrl+K` | jump to the Composer search |
 | `Ctrl+E` | send the selected session to the Composer |
 | `Ctrl+T` | open the TextWizard |
