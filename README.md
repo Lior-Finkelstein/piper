@@ -125,7 +125,7 @@ method:POST host:api status:>=400 -is:image body:"order"
 | `Ctrl+X` | clear sessions |
 | `Ctrl+C` | copy selected URLs |
 | `Del` | remove selected sessions |
-| middle-click | send a session to the Composer |
+| middle-click / double-click | send a session to the Composer |
 
 ## Testing
 
