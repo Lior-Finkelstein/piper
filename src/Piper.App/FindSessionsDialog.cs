@@ -172,8 +172,10 @@ public sealed class FindSessionsDialog : Form
         hint.ForeColor = Palette.TextDim;
 
         // A little over the laid-out rows, and the footer is docked so the buttons keep their room
-        // even if a larger system font grows the rows above them.
+        // even if a larger font grows the rows above them. The UI font is user-scalable, so let the
+        // rows scroll at the largest steps rather than lose the hint off the bottom.
         ClientSize = new Size(544, 252);
+        AutoScroll = true;
     }
 
     private FindSessionsRequest Request => new(
