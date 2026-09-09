@@ -24,8 +24,20 @@ internal sealed class DarkTabControl : TabControl
         // Signals to Palette.Apply that this control already owns its drawing.
         DrawMode = TabDrawMode.OwnerDrawFixed;
         Padding = new Point(14, 4);
-        ItemSize = new Size(0, 26);
+        ResizeTabStrip();
     }
+
+    protected override void OnFontChanged(EventArgs e)
+    {
+        base.OnFontChanged(e);
+        ResizeTabStrip();
+    }
+
+    /// <summary>
+    /// Sizes the tab strip from the current font. <see cref="TabDrawMode.OwnerDrawFixed"/> means the
+    /// strip height is ours to set, and a fixed one clips the labels as soon as the UI font grows.
+    /// </summary>
+    private void ResizeTabStrip() => ItemSize = new Size(0, Font.Height + 11);
 
     protected override void OnPaint(PaintEventArgs e)
     {

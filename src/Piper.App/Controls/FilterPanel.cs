@@ -59,7 +59,7 @@ public sealed class FilterPanel : UserControl
             Text = "Use Filters",
             AutoSize = false,
             Padding = new Padding(6, 10, 0, 0),
-            Font = new Font(Palette.UiFont, FontStyle.Bold),
+            Font = Palette.UiFontBold,
         };
         // The global switch is live in both directions, matching Fiddler: unchecking stops
         // filtering at once (leaving a filterset applied after the user disables it keeps
