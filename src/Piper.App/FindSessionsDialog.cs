@@ -225,7 +225,11 @@ public sealed class FindSessionsDialog : Form
 
     private static void DrawFooterBorder(object? sender, PaintEventArgs e)
     {
+        if (sender is not Control footer) return;
+
+        // The panel's own width, not the clip rectangle's: a repaint of just part of the footer
+        // clips a line measured from the region's width and leaves the separator broken.
         using var pen = new Pen(Palette.Border);
-        e.Graphics.DrawLine(pen, 0, 0, e.ClipRectangle.Width, 0);
+        e.Graphics.DrawLine(pen, 0, 0, footer.Width, 0);
     }
 }

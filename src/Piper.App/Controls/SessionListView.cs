@@ -331,7 +331,21 @@ public sealed class SessionListView : UserControl
             return;
         }
 
-        if (request.SelectMatches) SelectOnlyIndices(matches);
+        if (!request.SelectMatches) return;
+
+        SelectOnlyIndices(matches);
+
+        // Context-menu actions work on the selection, so a capped selection must not look like the
+        // whole result: say so rather than let an export or a delete quietly cover part of it.
+        if (matches.Count > MaxSelectedMatches)
+        {
+            var outcome = request.Highlight is null
+                ? $"{matches.Count:N0} sessions matched and had their marks removed."
+                : $"{matches.Count:N0} sessions matched and are marked.";
+            MessageBox.Show(FindForm(),
+                outcome + $"{Environment.NewLine}Only the first {MaxSelectedMatches:N0} are selected.",
+                "Find Sessions", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
     }
 
     /// <summary>
@@ -371,8 +385,9 @@ public sealed class SessionListView : UserControl
 
     /// <summary>
     /// Drops marks for sessions the store no longer holds, so a long capture cannot accumulate
-    /// them without bound. More marks than captured sessions is the only way that happens, which
-    /// keeps this off the common refresh path.
+    /// them without bound. The count check is a conservative trigger, not an exact one: a stale id
+    /// matches no row and so paints nothing, which makes it cheap to leave a few behind until the
+    /// marks outnumber the captured sessions, and keeps this off the common refresh path.
     /// </summary>
     private void PruneMarks(List<Session> allSessions)
     {
