@@ -541,6 +541,7 @@ await TextTransformsTests.RunAsync(runner);
 await TextTransformDetectorTests.RunAsync(runner);
 await SearchQueryTests.RunAsync(runner);
 await FilterSettingsStoreTests.RunAsync(runner);
+await FilterQueryTests.RunAsync(runner);
 await HostFilterHideTests.RunAsync(runner);
 await StatusBarSettingsStoreTests.RunAsync(runner);
 await ProxyConfigurationSettingsStoreTests.RunAsync(runner);
